@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>{% block title %}QPex Audit Hub{% endblock %}</title>
+    <!-- Preload the header image to eliminate visual delay -->
+    <link rel="preload" as="image" href="{{ url_for('static', filename='header_bin.jpg') }}">
+    <style>
+        /* Modern "Slick" Theme Variables */
+        :root { 
+            --primary: #3b82f6;
+            --primary-hover: #2563eb;
+            --surface: rgba(255, 255, 255, 0.85); 
+            --bg-color: #f1f5f9;
+            --text-dark: #0f172a;
+            --text-muted: #64748b;
+            --danger: #ef4444;
+            --danger-hover: #dc2626;
+            --success: #10b981;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-pill: 50px;
+            --shadow-soft: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            --shadow-float: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+
+        html, body { 
+            height: 100%; 
+            margin: 0; 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            background-color: var(--bg-color); 
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+            color: var(--text-dark);
+            touch-action: pan-x pan-y;
+        }
+        
+        .header-wrapper { 
+            padding: 8px 12px 4px 12px; 
+            flex-shrink: 0; 
+            z-index: 10; 
+        }
+
+        .header-link { 
+            display: block; 
+            text-decoration: none; 
+            border-radius: var(--radius-md); 
+            overflow: hidden; 
+            box-shadow: var(--shadow-soft); 
+        }
+
+        .header-img { 
+            width: 100%; 
+            max-height: 40px; 
+            object-fit: cover; 
+            display: block; 
+        }
+        
+        .user-info-bar { 
+            background: var(--surface); 
+            backdrop-filter: blur(10px); 
+            -webkit-backdrop-filter: blur(10px); 
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: var(--text-dark); 
+            padding: 6px 12px; 
+            margin: 4px 12px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+            font-size: 11px; 
+            font-weight: 600; 
+            border-radius: var(--radius-pill);
+            box-shadow: var(--shadow-soft); 
+            flex-shrink: 0; 
+            z-index: 10;
+        }
+
+        .user-info-text span { 
+            color: var(--primary); 
+        }
+
+        .logout-btn { 
+            background: var(--danger); 
+            color: white; 
+            text-decoration: none; 
+            padding: 4px 10px; 
+            border-radius: var(--radius-pill); 
+            font-size: 10px; 
+            font-weight: bold; 
+            transition: all 0.2s ease; 
+            box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3); 
+        }
+
+        .logout-btn:hover { 
+            background: var(--danger-hover); 
+            transform: translateY(-1px); 
+        }
+
+        .main-content { 
+            flex-grow: 1; 
+            padding: 4px 12px 12px 12px; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            overflow-y: auto; 
+            height: 100%; 
+        }
+        
+        .footer-wrapper { 
+            padding: 4px 12px 8px 12px; 
+            flex-shrink: 0; 
+        }
+
+        .footer { 
+            background: var(--surface); 
+            backdrop-filter: blur(10px); 
+            color: var(--text-muted); 
+            text-align: center; 
+            padding: 6px; 
+            font-size: 10px; 
+            border-radius: var(--radius-md); 
+            box-shadow: var(--shadow-soft); 
+            border: 1px solid rgba(255, 255, 255, 0.5); 
+            font-weight: 500; 
+        }
+        
+        .flash-message { 
+            width: 100%; 
+            max-width: 600px; 
+            padding: 8px; 
+            margin-bottom: 8px; 
+            border-radius: var(--radius-sm); 
+            text-align: center; 
+            color: white; 
+            font-weight: bold; 
+            flex-shrink: 0; 
+            font-size: 12px; 
+            box-shadow: var(--shadow-soft); 
+        }
+
+        .flash-danger { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+        .flash-success { background: linear-gradient(135deg, #10b981, #047857); }
+        .flash-info { background: linear-gradient(135deg, #3b82f6, #1d4ed8); }
+        
+        .camera-btn { 
+            width: 50px; 
+            background: linear-gradient(135deg, #0ea5e9, #0284c7); 
+            color: white; 
+            font-size: 18px; 
+            border: none; 
+            border-radius: var(--radius-md); 
+            cursor: pointer; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center; 
+            transition: all 0.2s ease; 
+            box-shadow: 0 4px 6px rgba(14, 165, 233, 0.3); 
+            flex-shrink: 0; 
+        }
+
+        .camera-btn:active { 
+            transform: scale(0.95); 
+        }
+
+        .camera-btn.has-image { 
+            background: linear-gradient(135deg, #10b981, #059669); 
+            box-shadow: 0 4px 6px rgba(16, 185, 129, 0.3); 
+        }
+        
+        #camera_modal { 
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: rgba(15, 23, 42, 0.95); 
+            backdrop-filter: blur(5px); 
+            z-index: 9999; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+        }
+
+        .video-wrapper { 
+            position: relative; 
+            width: 90%; 
+            max-width: 500px; 
+            display: flex; 
+            justify-content: center; 
+            overflow: hidden; 
+            border-radius: var(--radius-md); 
+            box-shadow: var(--shadow-float); 
+            background: #000; 
+            touch-action: none; 
+        }
+
+        #camera_image { 
+            width: 100%; 
+            max-height: 70vh; 
+            object-fit: contain; 
+        }
+
+        #camera_canvas { 
+            width: 100%; 
+            max-height: 70vh; 
+            object-fit: contain; 
+            cursor: crosshair; 
+        }
+
+        #crop_guide { 
+            position: absolute; 
+            top: 50%; 
+            left: 50%; 
+            transform: translate(-50%, -50%); 
+            width: 80%; 
+            height: 60%; 
+            border: 2px dashed #34d399; 
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.7); 
+            pointer-events: none; 
+            border-radius: 4px; 
+        }
+        
+        .camera-controls { 
+            margin-top: 15px; 
+            display: flex; 
+            flex-wrap: wrap; 
+            justify-content: center; 
+            gap: 8px; 
+            width: 90%; 
+        }
+
+        .cam-btn { 
+            padding: 8px 16px; 
+            font-weight: 600; 
+            border: none; 
+            border-radius: var(--radius-pill); 
+            font-size: 13px; 
+            cursor: pointer; 
+            transition: transform 0.1s; 
+            box-shadow: var(--shadow-soft); 
+        }
+
+        .cam-btn:active { transform: scale(0.95); }
+        .cam-btn-capture { background: var(--primary); color: #fff; }
+        .cam-btn-retake { background: #f59e0b; color: #fff; }
+        .cam-btn-accept { background: var(--success); color: #fff; }
+        .cam-btn-close { background: var(--danger); color: #fff; }
+        .cam-btn-clear { background: #64748b; color: #fff; }
+        
+        .hidden { display: none !important; }
+        
+        .draw-instruction { 
+            color: #34d399; 
+            font-weight: bold; 
+            margin-bottom: 10px; 
+            font-size: 14px; 
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5); 
+        }
+
+        /* Spinner Styles */
+        #global_spinner {
+            position: fixed; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            background: rgba(15, 23, 42, 0.85); 
+            backdrop-filter: blur(4px); 
+            z-index: 10000; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            color: white;
+        }
+
+        .spinner-icon {
+            font-size: 50px; 
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin { 
+            100% { transform: rotate(360deg); } 
+        }
+    </style>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+    <div id="global_spinner" class="hidden">
+        <div class="spinner-icon">⏳</div>
+        <h3 style="margin-top: 20px; font-weight: 600;">Fetching Data...</h3>
+        <p style="font-size: 13px; color: #cbd5e1; margin-top: 5px;">Syncing with Server & Flo-Lite</p>
+    </div>
+
+    <div class="header-wrapper">
+        <a href="{{ url_for('landing') }}" class="header-link" title="Return to Hub">
+            <!-- Added fetchpriority="high" to prioritize this image above all else -->
+            <img src="{{ url_for('static', filename='header_bin.jpg') }}" alt="QPex Audit Hub Header" class="header-img" fetchpriority="high">
+        </a>
+    </div>
+    
+    {% if session.get('ldap_id') %}
+    <div class="user-info-bar">
+        <div class="user-info-text">
+            <span>ID:</span> {{ session.get('ldap_id') }} &nbsp;|&nbsp; 
+            <span>WH:</span> {{ session.get('warehouse_id') }}
+        </div>
+        <a href="{{ url_for('quit_session') }}" class="logout-btn">Logout</a>
+    </div>
+    {% endif %}
+
+    <main class="main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="flash-message {{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {% block content %}{% endblock %}
+    </main>
+
+    <div id="camera_modal" class="hidden">
+        <div id="markup_instruction" class="draw-instruction hidden">Draw on image to highlight issues</div>
+        <div class="video-wrapper">
+            <img id="camera_image" class="hidden" alt="Captured Evidence">
+            <canvas id="camera_canvas" class="hidden"></canvas>
+            <div id="crop_guide"></div>
+        </div>
+        <div class="camera-controls">
+            <button id="btn_crop" class="cam-btn cam-btn-capture">Load / Crop</button>
+            <button id="btn_clear_markup" class="cam-btn cam-btn-clear hidden">Clear Draw</button>
+            <button id="btn_retake" class="cam-btn cam-btn-retake hidden">Retake</button>
+            <button id="btn_accept" class="cam-btn cam-btn-accept hidden">Accept</button>
+            <button id="btn_close_camera" class="cam-btn cam-btn-close">Close</button>
+        </div>
+    </div>
+
+    <div class="footer-wrapper">
+        <footer class="footer">
+            QPex Systems &copy; Kadam Nikhil
+        </footer>
+    </div>
+
+    {% block scripts %}{% endblock %}
+
+    <script>
+        // Idle Timer Configuration
+        let idleTime = 0; 
+        const IDLE_LIMIT = 30;
+        
+        let idleInterval = setInterval(() => { 
+            idleTime++; 
+            if (idleTime > IDLE_LIMIT) {
+                window.location.href = "{{ url_for('quit_session') }}"; 
+            }
+        }, 60000); 
+
+        const resetTimer = () => {
+            idleTime = 0;
+        };
+
+        // Event listeners to reset idle timer on activity
+        ['mousemove', 'keypress', 'touchstart', 'click'].forEach(e => {
+            document.body.addEventListener(e, resetTimer);
+        });
+
+        window.capturedBlob = null;
+        let originalCroppedImageData = null;
+        let isDrawing = false;
+
+        // Global helper function to escape HTML characters
+        window.safeEscapeHTML = function(str) {
+            return String(str)
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const cameraBtn = document.getElementById('camera_btn');
+            const cameraInput = document.getElementById('native_camera_input');
+            const cameraModal = document.getElementById('camera_modal');
+            const imgElement = document.getElementById('camera_image');
+            const canvas = document.getElementById('camera_canvas');
+            const cropGuide = document.getElementById('crop_guide');
+            const ctx = canvas.getContext('2d');
+
+            if (cameraBtn && cameraInput) {
+                
+                cameraBtn.addEventListener('click', () => {
+                    cameraInput.click();
+                });
+
+                cameraInput.addEventListener('change', function(e) {
+                    if (this.files && this.files[0]) {
+                        const reader = new FileReader();
+                        reader.onload = function(evt) {
+                            imgElement.onload = () => {
+                                cameraModal.classList.remove('hidden');
+                                imgElement.classList.remove('hidden');
+                                cropGuide.classList.remove('hidden');
+                                canvas.classList.add('hidden');
+                                document.getElementById('markup_instruction').classList.add('hidden');
+                                document.getElementById('btn_crop').classList.remove('hidden');
+                                document.getElementById('btn_retake').classList.add('hidden');
+                                document.getElementById('btn_accept').classList.add('hidden');
+                                document.getElementById('btn_clear_markup').classList.add('hidden');
+                            };
+                            imgElement.src = evt.target.result;
+                        };
+                        reader.readAsDataURL(this.files[0]);
+                    }
+                });
+
+                document.getElementById('btn_crop').addEventListener('click', () => {
+                    const cropRect = cropGuide.getBoundingClientRect();
+                    const imgRect = imgElement.getBoundingClientRect();
+                    const scaleX = imgElement.naturalWidth / imgRect.width;
+                    const scaleY = imgElement.naturalHeight / imgRect.height;
+                    
+                    const cropX = (cropRect.left - imgRect.left) * scaleX;
+                    const cropY = (cropRect.top - imgRect.top) * scaleY;
+                    const cropW = cropRect.width * scaleX;
+                    const cropH = cropRect.height * scaleY;
+
+                    canvas.width = cropW; 
+                    canvas.height = cropH;
+                    ctx.drawImage(imgElement, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                    
+                    // Save image state before drawing starts
+                    originalCroppedImageData = ctx.getImageData(0, 0, cropW, cropH);
+
+                    // Setup drawing context
+                    ctx.strokeStyle = '#ef4444'; 
+                    ctx.lineWidth = 5; 
+                    ctx.lineCap = 'round'; 
+                    ctx.lineJoin = 'round';
+
+                    imgElement.classList.add('hidden'); 
+                    cropGuide.classList.add('hidden'); 
+                    canvas.classList.remove('hidden');
+                    
+                    document.getElementById('markup_instruction').classList.remove('hidden');
+                    document.getElementById('btn_crop').classList.add('hidden');
+                    document.getElementById('btn_clear_markup').classList.remove('hidden');
+                    document.getElementById('btn_retake').classList.remove('hidden');
+                    document.getElementById('btn_accept').classList.remove('hidden');
+                });
+
+                // Helper to get consistent mouse/touch position
+                function getMousePos(evt) {
+                    const rect = canvas.getBoundingClientRect();
+                    const scaleX = canvas.width / rect.width;
+                    const scaleY = canvas.height / rect.height;
+                    
+                    let clientX = evt.clientX; 
+                    let clientY = evt.clientY;
+                    
+                    if(evt.touches && evt.touches.length > 0) { 
+                        clientX = evt.touches[0].clientX; 
+                        clientY = evt.touches[0].clientY; 
+                    }
+                    
+                    return { 
+                        x: (clientX - rect.left) * scaleX, 
+                        y: (clientY - rect.top) * scaleY 
+                    };
+                }
+
+                const startDraw = (e) => { 
+                    e.preventDefault(); 
+                    isDrawing = true; 
+                    const pos = getMousePos(e); 
+                    ctx.beginPath(); 
+                    ctx.moveTo(pos.x, pos.y); 
+                };
+
+                const draw = (e) => { 
+                    e.preventDefault(); 
+                    if(!isDrawing) return; 
+                    const pos = getMousePos(e); 
+                    ctx.lineTo(pos.x, pos.y); 
+                    ctx.stroke(); 
+                };
+
+                const stopDraw = (e) => { 
+                    e.preventDefault(); 
+                    isDrawing = false; 
+                    ctx.closePath(); 
+                };
+
+                // Mouse Event Listeners
+                canvas.addEventListener('mousedown', startDraw); 
+                canvas.addEventListener('mousemove', draw); 
+                canvas.addEventListener('mouseup', stopDraw); 
+                canvas.addEventListener('mouseleave', stopDraw);
+                
+                // Touch Event Listeners
+                canvas.addEventListener('touchstart', startDraw, {passive: false}); 
+                canvas.addEventListener('touchmove', draw, {passive: false}); 
+                canvas.addEventListener('touchend', stopDraw, {passive: false});
+
+                document.getElementById('btn_clear_markup').addEventListener('click', () => {
+                    if (originalCroppedImageData) {
+                        ctx.putImageData(originalCroppedImageData, 0, 0);
+                        ctx.strokeStyle = '#ef4444'; 
+                        ctx.lineWidth = 5; 
+                        ctx.lineCap = 'round'; 
+                        ctx.lineJoin = 'round';
+                    }
+                });
+
+                document.getElementById('btn_retake').addEventListener('click', () => { 
+                    cameraModal.classList.add('hidden'); 
+                    window.capturedBlob = null; 
+                    cameraInput.value = ""; 
+                    cameraInput.click(); 
+                });
+
+                document.getElementById('btn_accept').addEventListener('click', () => {
+                    canvas.toBlob((blob) => {
+                        window.capturedBlob = blob;
+                        cameraBtn.classList.add('has-image');
+                        cameraBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+                        cameraBtn.style.boxShadow = '0 4px 6px rgba(16, 185, 129, 0.3)';
+                        cameraModal.classList.add('hidden');
+                    }, 'image/jpeg', 0.85);
+                });
+
+                document.getElementById('btn_close_camera').addEventListener('click', () => { 
+                    cameraModal.classList.add('hidden'); 
+                    cameraInput.value = ""; 
+                });
+            }
+        });
+    </script>
+</body>
+</html>

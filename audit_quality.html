@@ -1,0 +1,282 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ config.title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .scanner-container { width: 100%; max-width: 600px; background: white; padding: 15px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; position: relative; border-radius: 6px; box-sizing: border-box; margin-bottom: 20px; }
+    .audit-title { color: #007bff; margin-top: 0; margin-bottom: 20px; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    .form-group { margin-bottom: 15px; text-align: left; }
+    label { display: block; margin-bottom: 5px; font-weight: 600; color: #495057; }
+    input, select { width: 100%; padding: 12px; border: 1px solid #ccc; font-size: 16px; box-sizing: border-box; border-radius: 4px; }
+    input:disabled, select:disabled { background-color: #e9ecef; }
+    .item-info { background: #f8f9fa; padding: 15px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 15px; text-align: left; font-size: 14px;}
+    .item-info strong { color: #333; }
+    #submit_btn { flex-grow: 1; padding: 15px; background: green; color: white; font-size: 18px; font-weight: bold; border: none; cursor: pointer; border-radius: 5px;}
+    #submit_btn:disabled { background: #aaa; cursor: not-allowed; }
+    #ribbon { padding: 10px; color: white; font-weight: bold; background: gray; text-align: center; border-radius: 4px; margin-bottom: 15px; }
+    
+    /* Camera/Crop Modal Styles */
+    #camera_modal {
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000;
+        z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .video-wrapper {
+        position: relative; width: 100%; max-width: 500px; display: flex; justify-content: center; overflow: hidden;
+    }
+    #camera_image, #camera_canvas { width: 100%; max-height: 75vh; object-fit: contain; }
+    #crop_guide {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        width: 80%; height: 60%; border: 2px dashed #00ff00;
+        box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6); pointer-events: none;
+    }
+    .camera-controls { margin-top: 20px; display: flex; gap: 15px; }
+    .cam-btn { padding: 12px 24px; font-weight: bold; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; }
+    .cam-btn-capture { background: #007bff; color: #fff; }
+    .cam-btn-retake { background: #ffc107; color: #000; }
+    .cam-btn-accept { background: #28a745; color: #fff; }
+    .cam-btn-close { background: #dc3545; color: #fff; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="scanner-container">
+    <h2 class="audit-title" style="color: {% if audit_type == 'shrink_wrap' %}#20c997{% else %}#e83e8c{% endif %};">{{ config.title }}</h2>
+
+    <div id="ribbon" class="hidden"></div>
+    
+    <div class="form-group">
+        <label>WID</label>
+        <input type="text" id="wid" placeholder="Scan WID and hit Enter" autocomplete="off" autofocus>
+    </div>
+
+    <div id="item_details" class="item-info hidden">
+        <div style="margin-bottom: 5px;"><strong>Product:</strong> <span id="lbl_title"></span></div>
+        <div style="margin-bottom: 5px;"><strong>FSN:</strong> <span id="lbl_fsn"></span></div>
+        <div><strong>Vertical:</strong> <span id="lbl_vertical"></span></div>
+    </div>
+
+    <div style="display: flex; gap: 10px;">
+        <div class="form-group" style="flex: 1;">
+            <label>Qty</label>
+            <input type="number" id="qty" placeholder="Qty" disabled min="1">
+        </div>
+        <div class="form-group" style="flex: 2;">
+            <label>Pass / Fail</label>
+            <select id="pass_fail" disabled>
+                <option value="">Select Status...</option>
+                <option value="Pass">Pass</option>
+                <option value="Fail">Fail</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="action-row">
+        <button id="submit_btn" disabled>Log Audit</button>
+        <button id="camera_btn" type="button" class="camera-btn" title="Capture Evidence">📷</button>
+        <!-- Native Camera Trigger -->
+        <input type="file" id="native_camera_input" accept="image/*" capture="environment" class="hidden">
+    </div>
+</div>
+
+<!-- Image Crop Modal -->
+<div id="camera_modal" class="hidden">
+    <div class="video-wrapper">
+        <img id="camera_image" class="hidden" alt="Captured Evidence">
+        <canvas id="camera_canvas" class="hidden"></canvas>
+        <div id="crop_guide"></div>
+    </div>
+    
+    <div class="camera-controls">
+        <button id="btn_crop" class="cam-btn cam-btn-capture">Crop Image</button>
+        <button id="btn_retake" class="cam-btn cam-btn-retake hidden">Retake</button>
+        <button id="btn_accept" class="cam-btn cam-btn-accept hidden">Accept</button>
+        <button id="btn_close_camera" class="cam-btn cam-btn-close">Close</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const auditType = "{{ audit_type }}";
+    window.capturedBlob = null;
+
+    // --- NATIVE CAMERA & CROP LOGIC ---
+    const cameraInput = document.getElementById('native_camera_input');
+    const cameraBtn = document.getElementById('camera_btn');
+    const cameraModal = document.getElementById('camera_modal');
+    const imgElement = document.getElementById('camera_image');
+    const canvas = document.getElementById('camera_canvas');
+    const cropGuide = document.getElementById('crop_guide');
+
+    // 1. Button triggers Native Camera App
+    cameraBtn.addEventListener('click', () => {
+        cameraInput.click();
+    });
+
+    // 2. Load captured image into modal
+    cameraInput.addEventListener('change', function(e) {
+        if (this.files && this.files[0]) {
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+                imgElement.onload = () => {
+                    cameraModal.classList.remove('hidden');
+                    imgElement.classList.remove('hidden');
+                    cropGuide.classList.remove('hidden');
+                    canvas.classList.add('hidden');
+                    
+                    document.getElementById('btn_crop').classList.remove('hidden');
+                    document.getElementById('btn_retake').classList.add('hidden');
+                    document.getElementById('btn_accept').classList.add('hidden');
+                };
+                imgElement.src = evt.target.result;
+            };
+            reader.readAsDataURL(this.files[0]);
+        }
+    });
+
+    // 3. Crop the image based on the green dashed guide
+    document.getElementById('btn_crop').addEventListener('click', () => {
+        const cropRect = cropGuide.getBoundingClientRect();
+        const imgRect = imgElement.getBoundingClientRect();
+        
+        // Calculate the scale difference between the display size and actual image resolution
+        const scaleX = imgElement.naturalWidth / imgRect.width;
+        const scaleY = imgElement.naturalHeight / imgRect.height;
+        
+        // Target Crop Coordinates
+        const cropX = (cropRect.left - imgRect.left) * scaleX;
+        const cropY = (cropRect.top - imgRect.top) * scaleY;
+        const cropW = cropRect.width * scaleX;
+        const cropH = cropRect.height * scaleY;
+
+        canvas.width = cropW;
+        canvas.height = cropH;
+        const ctx = canvas.getContext('2d');
+        
+        // Draw only the cropped portion
+        ctx.drawImage(imgElement, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+        imgElement.classList.add('hidden');
+        cropGuide.classList.add('hidden');
+        canvas.classList.remove('hidden');
+        
+        document.getElementById('btn_crop').classList.add('hidden');
+        document.getElementById('btn_retake').classList.remove('hidden');
+        document.getElementById('btn_accept').classList.remove('hidden');
+    });
+
+    // 4. Retake Photo (re-opens Native Camera)
+    document.getElementById('btn_retake').addEventListener('click', () => {
+        cameraModal.classList.add('hidden');
+        window.capturedBlob = null;
+        cameraInput.value = "";
+        cameraInput.click();
+    });
+
+    // 5. Accept Cropped Image
+    document.getElementById('btn_accept').addEventListener('click', () => {
+        canvas.toBlob((blob) => {
+            window.capturedBlob = blob;
+            cameraBtn.classList.add('has-image');
+            cameraBtn.style.backgroundColor = '#28a745'; // Green indicates success
+            cameraModal.classList.add('hidden');
+        }, 'image/jpeg', 0.85);
+    });
+
+    document.getElementById('btn_close_camera').addEventListener('click', () => {
+        cameraModal.classList.add('hidden');
+        cameraInput.value = "";
+    });
+    // ----------------------------------
+
+
+    function showMessage(text, color) {
+        let msgBox = document.getElementById("ribbon");
+        msgBox.textContent = text; msgBox.style.background = color;
+        msgBox.classList.remove("hidden");
+        setTimeout(() => msgBox.classList.add("hidden"), 3500);
+    }
+
+    document.getElementById("wid").addEventListener("keypress", function(e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            let wid = this.value.trim(); if (!wid) return;
+
+            let formData = new FormData();
+            formData.append("wid", wid);
+            formData.append("audit_type", auditType);
+
+            fetch("/api/check_quality_wid", { method: "POST", body: formData })
+            .then(res => res.json()).then(data => {
+                if (data.status === "error") { showMessage(data.message, "red"); resetFields(); return; }
+                if (!data.is_applicable) { showMessage(data.message, "orange"); resetFields(); return; }
+
+                document.getElementById("lbl_title").textContent = data.title;
+                document.getElementById("lbl_fsn").textContent = data.fsn;
+                document.getElementById("lbl_vertical").textContent = data.vertical;
+                document.getElementById("item_details").classList.remove("hidden");
+
+                document.getElementById("qty").disabled = false;
+                document.getElementById("pass_fail").disabled = false;
+                document.getElementById("submit_btn").disabled = false;
+                document.getElementById("wid").disabled = true;
+
+                document.getElementById("qty").focus();
+                showMessage("WID verified. Enter Qty and Pass/Fail.", "green");
+            }).catch(() => showMessage("Server Error.", "red"));
+        }
+    });
+
+    document.getElementById("submit_btn").addEventListener("click", function () {
+        let wid = document.getElementById("wid").value.trim();
+        let qty = document.getElementById("qty").value.trim();
+        let passFail = document.getElementById("pass_fail").value;
+        let fsn = document.getElementById("lbl_fsn").textContent;
+        let title = document.getElementById("lbl_title").textContent;
+        let vertical = document.getElementById("lbl_vertical").textContent;
+
+        if (!qty || parseInt(qty) <= 0) { showMessage("Valid quantity required.", "red"); return; }
+        if (!passFail) { showMessage("Please select Pass or Fail.", "red"); return; }
+
+        this.disabled = true;
+        this.textContent = "Processing...";
+
+        let formData = new FormData();
+        formData.append("wid", wid); formData.append("qty", qty); formData.append("pass_fail", passFail);
+        formData.append("audit_type", auditType); formData.append("fsn", fsn); formData.append("title", title);
+        formData.append("vertical", vertical);
+
+        if (window.capturedBlob) {
+            formData.append("evidence_image", window.capturedBlob, "evidence.jpg");
+        }
+
+        fetch("/api/submit_quality_audit", { method: "POST", body: formData })
+        .then(res => res.json()).then(data => {
+            if (data.status === "success") {
+                showMessage(data.message, "green");
+                resetFields();
+            } else {
+                showMessage(data.message, "red");
+            }
+            this.textContent = "Log Audit";
+        }).catch(() => { showMessage("Error logging audit", "red"); this.disabled = false; this.textContent = "Log Audit"; });
+    });
+
+    function resetFields() {
+        let widInput = document.getElementById("wid");
+        widInput.value = ""; widInput.disabled = false;
+        document.getElementById("item_details").classList.add("hidden");
+        
+        let qtyInput = document.getElementById("qty"); qtyInput.value = ""; qtyInput.disabled = true;
+        let pfSelect = document.getElementById("pass_fail"); pfSelect.value = ""; pfSelect.disabled = true;
+        
+        window.capturedBlob = null;
+        cameraInput.value = "";
+        if(cameraBtn) { cameraBtn.classList.remove('has-image'); cameraBtn.style.backgroundColor = '#17a2b8'; }
+
+        document.getElementById("submit_btn").disabled = true;
+        widInput.focus();
+    }
+</script>
+{% endblock %}

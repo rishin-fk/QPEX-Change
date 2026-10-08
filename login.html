@@ -1,0 +1,130 @@
+{% extends "layout.html" %}
+
+{% block title %}Login - QPex Audit Hub{% endblock %}
+
+{% block content %}
+<div style="width: 100%; max-width: 400px; background: white; padding: 2.5rem; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1); border-radius: 8px; text-align: center; box-sizing: border-box;">
+    <h2 style="color: #343a40; margin-top: 0; margin-bottom: 1.5rem;">QPex Audit Hub Login</h2>
+
+    <div id="login-status-ribbon" style="display: none; padding: 1rem; margin-bottom: 1.5rem; border-radius: 5px; color: #fff; text-align: center; background-color: #17a2b8; font-weight: bold;">
+        Logging in, please wait...
+    </div>
+
+    {% if show_otp_popup %}
+    <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); display: flex; justify-content: center; align-items: center; z-index: 2000;">
+        <div style="background: white; padding: 2rem; border-radius: 8px; width: 90%; max-width: 350px; text-align: center;">
+            <h2 style="margin-top:0;">2FA Verification</h2>
+            <p style="color: #6c757d;">An OTP has been sent to your email.</p>
+            <form method="POST" action="{{ url_for('login') }}" id="otp-form">
+                <input type="hidden" name="temp_id" value="{{ temp_id }}">
+                <input type="text" name="otp_input" id="otp-input" placeholder="0000" required autofocus autocomplete="off" style="width: 100%; padding: 15px; margin: 20px 0; font-size: 1.5rem; text-align: center; letter-spacing: 5px; border: 2px solid #007bff; border-radius: 6px; font-weight: bold; box-sizing: border-box;">
+                <button type="submit" id="otp-submit-button" style="width: 100%; padding: 15px; background: #007bff; color: white; font-size: 16px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer;">Submit OTP</button>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <form method="POST" id="login-form">
+        <div style="margin-bottom: 1.25rem; text-align: left; position: relative;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #495057;">Warehouse</label>
+            <input type="text" id="warehouse_search" placeholder="Type to search..." autocomplete="off" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; box-sizing: border-box; font-size: 16px;">
+            <input type="hidden" id="warehouse_id" name="warehouse_id">
+            <div id="warehouse_dropdown" style="display: none; position: absolute; background-color: white; width: 100%; box-shadow: 0 8px 16px rgba(0,0,0,0.2); z-index: 10; max-height: 200px; overflow-y: auto; border: 1px solid #ddd;">
+                {% for wh in warehouses %}
+                    <a href="#" style="color: black; padding: 12px 16px; text-decoration: none; display: block; border-bottom: 1px solid #eee;">{{ wh }}</a>
+                {% endfor %}
+            </div>
+        </div>
+        <div style="margin-bottom: 1.25rem; text-align: left;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #495057;">LDAP ID</label>
+            <input type="text" name="ldap_id" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; box-sizing: border-box; font-size: 16px;">
+        </div>
+        <div style="margin-bottom: 1.25rem; text-align: left;">
+            <label style="display: block; margin-bottom: 0.5rem; font-weight: 600; color: #495057;">Password</label>
+            <input type="password" name="password" required style="width: 100%; padding: 12px; border: 1px solid #ced4da; border-radius: 4px; box-sizing: border-box; font-size: 16px;">
+        </div>
+        <button type="submit" id="login-button" style="width: 100%; padding: 15px; background: #007bff; color: white; font-size: 18px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; margin-top: 10px;">Login</button>
+    </form>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const searchInput = document.getElementById('warehouse_search');
+    const hiddenInput = document.getElementById('warehouse_id');
+    const dropdown = document.getElementById('warehouse_dropdown');
+    const dropdownItems = dropdown.getElementsByTagName('a');
+
+    searchInput.addEventListener('input', function() {
+        const filter = searchInput.value.toUpperCase();
+        hiddenInput.value = ''; 
+        let hasVisible = false;
+        for (let item of dropdownItems) {
+            if (item.textContent.toUpperCase().indexOf(filter) > -1) {
+                item.style.display = ""; hasVisible = true;
+            } else { item.style.display = "none"; }
+        }
+        dropdown.style.display = hasVisible ? 'block' : 'none';
+    });
+
+    searchInput.addEventListener('focus', () => dropdown.style.display = 'block');
+    document.addEventListener('click', (e) => { if (!searchInput.contains(e.target)) dropdown.style.display = 'none'; });
+
+    for (let item of dropdownItems) {
+        item.addEventListener('click', function(e) {
+            e.preventDefault();
+            searchInput.value = this.textContent;
+            hiddenInput.value = this.textContent;
+            dropdown.style.display = 'none';
+        });
+    }
+    
+    document.getElementById('login-form').addEventListener('submit', function(e) {
+        if (!hiddenInput.value) { alert('Select a warehouse.'); e.preventDefault(); return; }
+        // Only the button is disabled here - it has no name attribute so its state
+        // doesn't affect submitted data. Disabling the actual ldap_id/password/
+        // warehouse_search inputs would be a real bug: disabled form fields are
+        // excluded from the submitted POST body entirely, so the server would
+        // receive an empty username/password. Use readonly (not disabled) if a
+        // visual "locked" look is wanted - readonly fields still get submitted.
+        document.getElementById('login-button').disabled = true;
+        document.getElementById('login-button').textContent = 'Logging in...';
+        searchInput.readOnly = true;
+        document.querySelector('input[name="ldap_id"]').readOnly = true;
+        document.querySelector('input[name="password"]').readOnly = true;
+        document.getElementById('login-status-ribbon').style.display = 'block';
+    });
+
+    // If the browser restores this page from cache (bfcache) via Back/Forward after a
+    // slow or failed attempt, the form can come back still showing the disabled/locked
+    // state from before - re-enable it so the user isn't stuck unable to retry without
+    // a hard refresh.
+    window.addEventListener('pageshow', function(event) {
+        if (event.persisted) {
+            document.getElementById('login-button').disabled = false;
+            document.getElementById('login-button').textContent = 'Login';
+            searchInput.readOnly = false;
+            document.querySelector('input[name="ldap_id"]').readOnly = false;
+            document.querySelector('input[name="password"]').readOnly = false;
+            document.getElementById('login-status-ribbon').style.display = 'none';
+            let otpBtn = document.getElementById('otp-submit-button');
+            if (otpBtn) {
+                otpBtn.disabled = false;
+                otpBtn.textContent = 'Submit OTP';
+                document.getElementById('otp-input').readOnly = false;
+            }
+        }
+    });
+
+    let otpForm = document.getElementById('otp-form');
+    if (otpForm) {
+        // Same fix here - readonly, not disabled, or otp_input would be stripped
+        // from the POST body just like ldap_id/password were above.
+        otpForm.addEventListener('submit', function(e) {
+            document.getElementById('otp-submit-button').disabled = true;
+            document.getElementById('otp-submit-button').textContent = 'Processing...';
+            document.getElementById('otp-input').readOnly = true;
+        });
+    }
+</script>
+{% endblock %}

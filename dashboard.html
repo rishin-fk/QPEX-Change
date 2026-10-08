@@ -1,0 +1,39 @@
+{% extends "layout.html" %}
+
+{% block title %}Daily Dashboard{% endblock %}
+
+{% block content %}
+<div style="width: 100%; max-width: 800px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0px 0px 10px rgba(0,0,0,0.1); box-sizing: border-box;">
+    
+    <a href="{{ url_for('landing') }}" style="display: inline-block; padding: 10px 15px; background: #6c757d; color: white; text-decoration: none; border-radius: 4px; margin-bottom: 20px; font-weight: bold;">← Back to Hub</a>
+    
+    <h2 style="margin-top: 0; text-align: center; color: #343a40;">Audit Summary for {{ date }}</h2>
+    
+    <div style="width: 100%; overflow-x: auto; margin-top: 20px;">
+        {% if stats %}
+        <table style="width: 100%; border-collapse: collapse; text-align: center;">
+            <thead>
+                <tr style="background: #007bff; color: white;">
+                    <th style="padding: 12px; border: 1px solid #ddd;">Audit Type</th>
+                    <th style="padding: 12px; border: 1px solid #ddd;">User (LDAP)</th>
+                    <th style="padding: 12px; border: 1px solid #ddd;">Unique Scans</th>
+                    <th style="padding: 12px; border: 1px solid #ddd;">Total Items</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in stats %}
+                <tr>
+                    <td style="padding: 12px; border: 1px solid #ddd; font-weight: bold;">{{ row['Audit Category'] }}</td>
+                    <td style="padding: 12px; border: 1px solid #ddd;">{{ row['LDAP ID'] }}</td>
+                    <td style="padding: 12px; border: 1px solid #ddd;">{{ row['Boxes_Audited'] }}</td>
+                    <td style="padding: 12px; border: 1px solid #ddd;">{{ row['Items_Audited'] }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="text-align: center; color: #6c757d; font-size: 16px; padding: 20px;">No audits completed today yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

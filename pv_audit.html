@@ -1,0 +1,248 @@
+{% extends "layout.html" %}
+
+{% block title %}PV Audit{% endblock %}
+
+{% block extra_head %}
+<style>
+    .scanner-container { width: 100%; max-width: 600px; background: white; padding: 12px; box-shadow: var(--shadow-float); border-radius: var(--radius-md); box-sizing: border-box; }
+    .audit-title { color: #f97316; margin-top: 0; margin-bottom: 10px; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 5px; font-size: 18px; }
+    
+    .form-group { margin-bottom: 12px; text-align: left; }
+    label { display: block; margin-bottom: 4px; font-weight: 600; color: var(--text-muted); font-size: 12px; }
+    input, select, textarea { width: 100%; padding: 8px; border: 1px solid #ccc; font-size: 14px; box-sizing: border-box; border-radius: 4px; }
+    
+    .camera-row { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; }
+    .cam-btn-small { flex: 1; background: var(--primary); color: white; border: none; border-radius: 4px; padding: 10px 0; font-size: 12px; font-weight: bold; cursor: pointer; text-align: center; }
+    
+    #finalise { width: 100%; padding: 12px; background: var(--success); color: white; font-size: 16px; font-weight: bold; border: none; cursor: pointer; border-radius: 5px; margin-top: 15px; }
+    #finalise:disabled { background: #aaa; cursor: not-allowed; }
+    
+    .info-box { background: #f8f9fa; border-left: 4px solid var(--primary); padding: 10px; margin-bottom: 15px; border-radius: 4px; font-size: 12px; }
+    .info-box strong { color: var(--text-dark); }
+
+    /* Custom emphasis for verification step */
+    #verify_scan:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3); outline: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="scanner-container">
+    <h2 class="audit-title">PV Audit</h2>
+
+    <div class="form-group" id="step1">
+        <label>PV Status</label>
+        <select id="pv_status">
+            <option value="">-- Select Status --</option>
+            <option value="PV Pass">PV Pass</option>
+            <option value="PV Fail">PV Fail</option>
+        </select>
+        
+        <label style="margin-top: 10px;">WSN</label>
+        <input type="text" id="box_id" placeholder="Scan WSN" autocomplete="off">
+    </div>
+    
+    <div id="step2" class="hidden">
+        <div class="info-box" id="scraped_info">
+            <!-- Populated by JS -->
+        </div>
+
+        <!-- NEW: Verification Step -->
+        <div class="form-group" id="verify_section" style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #eee;">
+            <label style="color: var(--primary); font-size: 14px;">Verify Product (Scan FSN / EAN / LID)</label>
+            <input type="text" id="verify_scan" placeholder="Scan barcode to unlock audit options" autocomplete="off" style="border: 2px solid var(--primary);">
+        </div>
+
+        <!-- Hidden until verification succeeds or forces through -->
+        <div id="audit_section" class="hidden">
+            <div class="form-group">
+                <label>Issue</label>
+                <select id="issue">
+                    <option value="No issue">No issue</option>
+                    <option value="Attribute Mismatch">Attribute Mismatch</option>
+                    <option value="Product Damaged">Product Damaged</option>
+                    <option value="Others">Others</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Sub Issue</label>
+                <select id="sub_issue">
+                    <option value="No issue">No issue</option>
+                </select>
+            </div>
+
+            <label>Evidence Images (Optional)</label>
+            <div class="camera-row">
+                <button type="button" class="cam-btn-small" id="cam_wsn" onclick="openCamera('wsn')">📷 WSN</button>
+                <button type="button" class="cam-btn-small" id="cam_mrp_label" onclick="openCamera('mrp_label')">📷 MRP Label</button>
+                <button type="button" class="cam-btn-small" id="cam_product" onclick="openCamera('product')">📷 Product</button>
+            </div>
+
+            <button id="finalise">Submit Audit</button>
+        </div>
+    </div>
+    
+    <input type="file" id="native_camera_input" accept="image/*" capture="environment" class="hidden">
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const issueMap = {
+        "No issue": ["No issue"],
+        "Attribute Mismatch": ["Color Mismatch", "Brand Mismatched", "Image Mismatch", "Style Code /Model Id Mismatch", "Size mismatch", "Product  & box size mismatch"],
+        "Product Damaged": ["MRP Tag Damage", "MRP Tag Missing", "MRP Tag faded ", "Minor Stain on Product", "Major Stain on Product", "Product seal damage ", "Crack on body", "Fabric Wrinkled", "Part of Product Missing", "Original packaging damage", "Original packaging Missing"],
+        "Others": ["Fraud product", "Main product missing", "Catalog issue", "Misshipment", "Combo Issue", "Wrong Receiving"]
+    };
+
+    document.getElementById("issue").addEventListener("change", function() {
+        let subSelect = document.getElementById("sub_issue");
+        subSelect.innerHTML = "";
+        let options = issueMap[this.value] || [];
+        options.forEach(opt => {
+            let el = document.createElement("option");
+            el.value = opt;
+            el.textContent = opt;
+            subSelect.appendChild(el);
+        });
+    });
+
+    let currentCam = "";
+    let misshipBlobs = { wsn: null, mrp_label: null, product: null };
+    let currentScrapedData = null;
+
+    function openCamera(type) {
+        currentCam = type;
+        document.getElementById('native_camera_input').click();
+    }
+
+    // Override the layout's global camera callback
+    window.customCameraCallback = function(blob) {
+        misshipBlobs[currentCam] = blob;
+        document.getElementById('cam_' + currentCam).style.background = '#10b981';
+    };
+
+    document.getElementById("box_id").addEventListener("keypress", function (e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            let pvStatus = document.getElementById("pv_status").value;
+            if (!pvStatus) { alert("Select PV Status first!"); return; }
+
+            let boxId = this.value.trim(); 
+            if (!boxId) return;
+            
+            document.getElementById("global_spinner").classList.remove("hidden");
+            
+            let formData = new FormData(); 
+            formData.append("box_id", boxId);
+            fetch("/scan_box", { method: "POST", body: formData })
+            .then(res => res.json()).then(data => {
+                document.getElementById("global_spinner").classList.add("hidden");
+                if (data.status === "success" && data.extracted_data && data.extracted_data.length > 0) {
+                    currentScrapedData = data.extracted_data[0];
+                    document.getElementById("step1").classList.add("hidden");
+                    document.getElementById("step2").classList.remove("hidden");
+                    
+                    let safeFSN = window.safeEscapeHTML ? window.safeEscapeHTML(currentScrapedData.FSN) : currentScrapedData.FSN;
+                    let safeTitle = window.safeEscapeHTML ? window.safeEscapeHTML(currentScrapedData.Product) : currentScrapedData.Product;
+                    
+                    let infoHtml = `
+                        <div style="margin-bottom:4px;"><strong>FSN:</strong> ${safeFSN}</div>
+                        <div style="margin-bottom:4px;"><strong>Title:</strong> ${safeTitle}</div>
+                        <div><strong>Vertical:</strong> ${currentScrapedData.Vertical}</div>
+                    `;
+                    document.getElementById("scraped_info").innerHTML = infoHtml;
+
+                    // Reset and lock verification flow
+                    document.getElementById("audit_section").classList.add("hidden");
+                    let verifyInput = document.getElementById("verify_scan");
+                    verifyInput.value = "";
+                    verifyInput.disabled = false;
+                    verifyInput.style.borderColor = "var(--primary)";
+                    verifyInput.focus();
+
+                } else {
+                    alert(data.message || "Failed to retrieve data.");
+                }
+            }).catch(() => {
+                document.getElementById("global_spinner").classList.add("hidden");
+                alert("Server Error");
+            });
+        }
+    });
+
+    // Verification Logic: Compares scan to FSN or Product Title EAN, but allows proceeding on mismatch
+    document.getElementById("verify_scan").addEventListener("keypress", function (e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            let val = this.value.trim().toUpperCase();
+            if (!val) return;
+            
+            let fsn = currentScrapedData.FSN ? currentScrapedData.FSN.toUpperCase() : "";
+            let title = currentScrapedData.Product ? currentScrapedData.Product.toUpperCase() : "";
+            
+            if (val === fsn || title.includes(val)) {
+                // Success
+                this.style.borderColor = "#28a745";
+                if (typeof showMessage === 'function') {
+                    showMessage("Product Verified Successfully!", "green");
+                }
+            } else {
+                // Mismatch - Warn but proceed anyway
+                this.style.borderColor = "#f97316";
+                if (typeof showMessage === 'function') {
+                    showMessage("Mismatch detected, but proceeding...", "orange");
+                }
+            }
+            
+            this.disabled = true;
+            
+            // Unlock Audit Options in BOTH cases
+            document.getElementById("audit_section").classList.remove("hidden");
+            document.getElementById("issue").focus();
+        }
+    });
+
+    document.getElementById("finalise").addEventListener("click", function() {
+        let pvStatus = document.getElementById("pv_status").value;
+        let issue = document.getElementById("issue").value;
+        let subIssue = document.getElementById("sub_issue").value;
+        
+        this.disabled = true;
+        this.textContent = "Submitting...";
+
+        let formData = new FormData();
+        formData.append("wsn", document.getElementById("box_id").value.trim());
+        formData.append("rev_id", currentScrapedData.Rev_ID); // Rev ID is still silently sent to Backend
+        formData.append("fsn", currentScrapedData.FSN);
+        formData.append("title", currentScrapedData.Product);
+        formData.append("vertical", currentScrapedData.Vertical);
+        formData.append("pv_status", pvStatus);
+        formData.append("issue", issue);
+        formData.append("sub_issue", subIssue);
+        
+        // Removed return reason logic; no longer mapped
+        formData.append("return_reason", "N/A");
+
+        if (misshipBlobs.wsn) formData.append("img_wsn", misshipBlobs.wsn, "wsn.jpg");
+        if (misshipBlobs.mrp_label) formData.append("img_mrp_label", misshipBlobs.mrp_label, "mrp_label.jpg");
+        if (misshipBlobs.product) formData.append("img_product", misshipBlobs.product, "prod.jpg");
+
+        fetch("/api/submit_misship_audit", { method: "POST", body: formData })
+        .then(res => res.json()).then(data => {
+            if(data.status === "success") {
+                alert("Audit Logged successfully!");
+                window.location.reload();
+            } else {
+                alert("Error: " + data.message);
+                this.disabled = false;
+                this.textContent = "Submit Audit";
+            }
+        }).catch(() => {
+            alert("Submission error");
+            this.disabled = false;
+            this.textContent = "Submit Audit";
+        });
+    });
+</script>
+{% endblock %}

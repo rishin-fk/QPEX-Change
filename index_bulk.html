@@ -1,0 +1,493 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ config.title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .scanner-container { width: 100%; max-width: 600px; background: white; padding: 10px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; flex-grow: 1; position: relative; border-radius: 6px; box-sizing: border-box; }
+    .audit-title { color: #fd7e14; margin-top: 0; margin-bottom: 10px; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 5px; font-size: 18px; }
+    
+    .input-wrapper { display: flex; align-items: center; gap: 5px; margin: 8px 0; width: 100%; box-sizing: border-box; }
+    input { padding: 8px; border: 1px solid #ccc; font-size: 14px; text-align: center; box-sizing: border-box; border-radius: 4px; width: 100%;}
+    #box_id { font-weight: bold;}
+    
+    #product_ean { flex: 1 1 0%; min-width: 0; }
+    #product_qty { width: 60px; flex-shrink: 0; }
+    button.action-btn { cursor: pointer; border-radius: 4px; border: 1px solid transparent; color: white; flex-shrink: 0; padding: 8px 10px; font-size: 13px; font-weight: bold;}
+    #add_button { background-color: #007bff; }
+    #undo_button { background-color: #dc3545; width: 45px; height: 35px; padding: 0; }
+    
+    .table-container { flex-grow: 1; overflow-y: auto; margin-top: 5px; margin-bottom: 5px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed;}
+    th, td { padding: 4px; border: 1px solid #ddd; text-align: center; font-size: 12px; overflow-wrap: break-word; word-break: break-word;}
+    th { background: #333; color: white; position: sticky; top: 0;}
+    
+    .ok { background: #27e619; color: #000; font-weight: 500;} 
+    .excess { background: #4861f0; color: white;} 
+    .excess-misship { background: #f04d01; color: white; } 
+    .short { background: #f79d15; color: white;}
+    .imei-mismatch { background: #ffc107; color: #000; font-weight: bold;}
+    
+    .action-row { display: flex; gap: 8px; margin-top: 5px; width: 100%; box-sizing: border-box; align-items: stretch;}
+    #finalise { flex-grow: 1; padding: 10px; background: green; color: white; font-size: 16px; font-weight: bold; border: none; cursor: pointer; border-radius: 5px; }
+    #finalise:disabled { background: #aaa; cursor: not-allowed; }
+    .camera-btn { width: 50px; background: #17a2b8; color: white; font-size: 20px; border: none; border-radius: 5px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    
+    #ribbon { padding: 6px; color: white; font-weight: bold; background: gray; text-align: center; border-radius: 4px; margin-bottom: 5px; font-size: 12px; }
+
+    .custom-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+    .modal-content { background: white; padding: 15px; border-radius: 8px; width: 90%; max-width: 400px; text-align: center; max-height: 85vh; overflow-y: auto; box-shadow: 0 5px 15px rgba(0,0,0,0.3);}
+    .modal-btn { padding: 8px 12px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; margin: 5px; font-size: 14px;}
+    .hidden { display: none !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="scanner-container">
+    <h2 class="audit-title">{{ config.title }}</h2>
+    <div id="ribbon" class="hidden"></div>
+    
+    <input type="text" id="box_id" placeholder="{{ config.placeholder }}" autofocus>
+    
+    <div class="input-wrapper">
+        <input type="text" id="product_ean" placeholder="Scan EAN" autocomplete="off" disabled>
+        <input type="number" id="product_qty" placeholder="Qty" value="1" disabled>
+        <button id="add_button" class="action-btn" disabled>Add</button>
+        <button id="undo_button" class="action-btn" disabled>Undo</button>
+    </div>
+    
+    <div class="table-container">
+        <table id="scanned_table">
+            <thead>
+                <tr>
+                    <th style="width: 45%;">Item Info</th>
+                    <th style="width: 20%;">Status</th>
+                    <th style="width: 15%;">Qty</th>
+                    <th style="width: 20%;">Dmg/Exp</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    
+    <div class="action-row">
+        <button id="finalise" disabled>Submit Audit</button>
+        <button id="camera_btn" type="button" class="camera-btn" title="Capture Evidence">📷</button>
+        <input type="file" id="native_camera_input" accept="image/*" capture="environment" class="hidden">
+    </div>
+</div>
+
+<!-- Expiry Alert Modal -->
+<div id="expiry_modal" class="custom-modal hidden">
+    <div class="modal-content" style="border: 2px solid #ef4444;">
+        <h3 style="color:#ef4444; margin-top:0; font-size:16px;">⚠️ EXPIRED ITEMS IN BIN</h3>
+        <p style="font-size:12px; color:#555; margin-bottom:10px;">The following expected items have expired!</p>
+        <div id="expiry_container" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; text-align: left;">
+        </div>
+        <button id="btn_close_expiry" class="modal-btn" style="background:#ef4444; color:white; width: 100%;">Acknowledge & Continue</button>
+    </div>
+</div>
+
+<!-- WID Verification Modal -->
+<div id="wid_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#007bff; margin-top:0;">WID Verification Required</h3>
+        <p style="font-size:12px; color:#555; margin-bottom:10px;">Multi-part product detected. Please scan the exact WID to confirm which part you are holding.</p>
+        <input type="text" id="popup_wid_input" placeholder="Scan WID" autocomplete="off" style="width:100%; padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid #ccc; text-align:center; font-size:14px;">
+        <div>
+            <button id="btn_cancel_wid" class="modal-btn" style="background:#dc3545; color:white;">Cancel</button>
+            <button id="btn_submit_wid" class="modal-btn" style="background:#28a745; color:white;">Verify & Next</button>
+        </div>
+    </div>
+</div>
+
+<!-- IMEI Verification Modal -->
+<div id="imei_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#007bff; margin-top:0;">IMEI Verification Required</h3>
+        <p style="font-size:12px; color:#555; margin-bottom:10px;">Please scan the IMEI for this product.</p>
+        <input type="text" id="popup_imei_input" placeholder="Scan IMEI" autocomplete="off" style="width:100%; padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid #ccc; text-align:center; font-size:14px;">
+        <div>
+            <button id="btn_cancel_imei" class="modal-btn" style="background:#dc3545; color:white;">Cancel</button>
+            <button id="btn_submit_imei" class="modal-btn" style="background:#28a745; color:white;">Verify & Add</button>
+        </div>
+    </div>
+</div>
+
+<!-- Short Items Confirmation Modal -->
+<div id="short_items_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#f79d15; margin-top:0;">Confirm Short Items</h3>
+        <p style="font-size:13px;">The following items are short. Please confirm actual quantity.</p>
+        <div id="short_items_container" style="margin-bottom:15px;"></div>
+        <div>
+            <button id="btn_cancel_short" class="modal-btn" style="background:#6c757d; color:white;">Cancel</button>
+            <button id="btn_confirm_short" class="modal-btn" style="background:#28a745; color:white;">Confirm & Submit</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const boxIdInput = document.getElementById("box_id");
+    const productEanInput = document.getElementById("product_ean");
+    const productQtyInput = document.getElementById("product_qty");
+    const addButton = document.getElementById("add_button");
+    const undoButton = document.getElementById("undo_button");
+    const finaliseButton = document.getElementById("finalise");
+    
+    let pendingEan = "";
+    let pendingQty = 1;
+    let pendingWid = "";
+
+    function encodeId(str) { return btoa(encodeURIComponent(str)); }
+    function decodeId(b64) { return decodeURIComponent(atob(b64)); }
+
+    function getSafeId(str) { return "row_" + encodeId(str).replace(/[^a-zA-Z0-9]/g, ''); }
+    
+    function getRowClass(match) {
+        if (!match) return 'ok';
+        let m = match.toUpperCase();
+        if (m.includes('MISMATCH')) return 'imei-mismatch';
+        if (m.includes('EXCESS (A)') || m.includes('MISSHIP') || m.includes('ALIEN')) return 'excess-misship';
+        if (m.includes('EXCESS')) return 'excess';
+        if (m.includes('SHORT')) return 'short';
+        return 'ok';
+    }
+
+    function toggleInput(checkbox, targetClass) {
+        let input = checkbox.closest('td').querySelector('.' + targetClass);
+        input.classList.toggle('hidden', !checkbox.checked);
+        if (!checkbox.checked) { input.value = ''; input.style.border = ''; }
+        input.oninput = function() { this.style.border = ''; };
+    }
+
+    boxIdInput.addEventListener("keypress", e => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            let boxId = boxIdInput.value.trim(); if (!boxId) return;
+            
+            document.getElementById("global_spinner").classList.remove("hidden");
+            
+            let formData = new FormData(); formData.append("box_id", boxId);
+            fetch("/scan_box", { method: "POST", body: formData })
+            .then(res => res.json()).then(data => {
+                document.getElementById("global_spinner").classList.add("hidden");
+                showMessage(data.message, data.status === "error" ? "red" : "green");
+                if (data.status === "success" || data.status === "warning") {
+                    boxIdInput.disabled = true; // Lock Input
+                    [productEanInput, productQtyInput, addButton].forEach(el => el.disabled = false);
+                    document.querySelector("#scanned_table tbody").innerHTML = '';
+                    
+                    if (data.expired_alerts && data.expired_alerts.length > 0) {
+                        let container = document.getElementById("expiry_container");
+                        container.innerHTML = "";
+                        data.expired_alerts.forEach(item => {
+                            let safeTitle = window.safeEscapeHTML ? window.safeEscapeHTML(item.title) : item.title;
+                            container.innerHTML += `
+                                <div style="background: #fee2e2; padding: 8px; border-radius: 4px; margin-bottom: 8px; border-left: 4px solid #ef4444;">
+                                    <div style="font-size: 11px; font-weight: bold; color: #b91c1c;">WID: ${item.wid} | FSN: ${item.fsn}</div>
+                                    <div style="font-size: 10px; color: #7f1d1d; margin: 4px 0;">${safeTitle}</div>
+                                    <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: bold; color: #991b1b;">
+                                        <span>Exp: ${item.expiry_date}</span>
+                                        <span>Qty: ${item.qty}</span>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        document.getElementById("expiry_modal").classList.remove("hidden");
+                    } else {
+                        productEanInput.focus();
+                    }
+                }
+            }).catch(() => {
+                document.getElementById("global_spinner").classList.add("hidden");
+                showMessage("Server Error", "red");
+            });
+        }
+    });
+
+    document.getElementById("btn_close_expiry").addEventListener("click", () => {
+        document.getElementById("expiry_modal").classList.add("hidden");
+        document.getElementById("product_ean").focus();
+    });
+
+    const addProduct = (imei = "", wid = "") => {
+        let ean = pendingEan || productEanInput.value.trim();
+        let qty = pendingQty > 1 ? pendingQty : (productQtyInput.value.trim() || 1);
+        if (!ean || parseInt(qty) <= 0) { showMessage("Valid EAN and Qty required.", "orange"); return; }
+        
+        productEanInput.disabled = true;
+
+        let formData = new FormData();
+        formData.append("scanned_ean", ean);
+        formData.append("quantity", qty);
+        
+        if (wid) pendingWid = wid;
+        if (pendingWid) formData.append("scanned_wid", pendingWid);
+        if (imei) formData.append("scanned_imei", imei);
+
+        fetch("/scan_product", { method: "POST", body: formData })
+        .then(res => res.json()).then(data => {
+            if(data.status === "error") { 
+                showMessage(data.message, "red"); 
+                if (!document.getElementById("wid_modal").classList.contains("hidden")) {
+                    document.getElementById("popup_wid_input").value = "";
+                    document.getElementById("popup_wid_input").focus();
+                } else if (!document.getElementById("imei_modal").classList.contains("hidden")) {
+                    document.getElementById("popup_imei_input").value = "";
+                    document.getElementById("popup_imei_input").focus();
+                } else {
+                    productEanInput.disabled = false;
+                    productEanInput.focus();
+                }
+                return; 
+            }
+
+            if(data.status === "require_wid") {
+                pendingEan = ean;
+                pendingQty = qty;
+                document.getElementById("popup_wid_input").value = "";
+                document.getElementById("wid_modal").classList.remove("hidden");
+                setTimeout(() => document.getElementById("popup_wid_input").focus(), 100);
+                showMessage(data.message, "orange");
+                return;
+            }
+
+            if(data.status === "require_imei") {
+                pendingEan = ean;
+                pendingQty = qty;
+                document.getElementById("popup_imei_input").value = "";
+                document.getElementById("wid_modal").classList.add("hidden");
+                document.getElementById("imei_modal").classList.remove("hidden");
+                setTimeout(() => document.getElementById("popup_imei_input").focus(), 100);
+                showMessage(data.message, "orange");
+                return;
+            }
+
+            if(data.summary) {
+                renderTable(data.summary);
+                document.getElementById("wid_modal").classList.add("hidden");
+                document.getElementById("imei_modal").classList.add("hidden");
+                productEanInput.value = ""; productQtyInput.value = "1"; 
+                pendingEan = ""; pendingQty = 1; pendingWid = "";
+                productEanInput.disabled = false;
+                productEanInput.focus();
+                finaliseButton.disabled = false; undoButton.disabled = false;
+            }
+        }).catch(() => {
+            showMessage("Server Error", "red");
+            productEanInput.disabled = false;
+            productEanInput.focus();
+        });
+    };
+
+    addButton.addEventListener("click", () => addProduct());
+    productQtyInput.addEventListener("keypress", e => { if (e.key === "Enter") addProduct(); });
+    productEanInput.addEventListener("keypress", e => { if (e.key === "Enter") addProduct(); });
+
+    document.getElementById("btn_submit_wid").addEventListener("click", () => {
+        let wid = document.getElementById("popup_wid_input").value.trim();
+        if (!wid) { showMessage("Please scan WID", "orange"); return; }
+        addProduct("", wid);
+    });
+
+    document.getElementById("btn_cancel_wid").addEventListener("click", () => {
+        document.getElementById("wid_modal").classList.add("hidden");
+        pendingEan = ""; pendingQty = 1; pendingWid = "";
+        productEanInput.value = "";
+        productEanInput.disabled = false;
+        productEanInput.focus();
+    });
+
+    document.getElementById("popup_wid_input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            document.getElementById("btn_submit_wid").click();
+        }
+    });
+
+    document.getElementById("btn_submit_imei").addEventListener("click", () => {
+        let imei = document.getElementById("popup_imei_input").value.trim();
+        if (!imei) { showMessage("Please scan IMEI", "orange"); return; }
+        addProduct(imei);
+    });
+
+    document.getElementById("btn_cancel_imei").addEventListener("click", () => {
+        document.getElementById("imei_modal").classList.add("hidden");
+        pendingEan = ""; pendingQty = 1; pendingWid = "";
+        productEanInput.value = "";
+        productEanInput.disabled = false;
+        productEanInput.focus();
+    });
+
+    document.getElementById("popup_imei_input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            document.getElementById("btn_submit_imei").click();
+        }
+    });
+
+    undoButton.addEventListener("click", () => {
+        fetch("/undo_scan", { method: "POST" }).then(res => res.json()).then(data => {
+            if (data.status === "error") { showMessage(data.message, "red"); return; }
+            showMessage(data.message, "orange");
+            if (data.summary) {
+                renderTable(data.summary);
+                if (data.summary.length === 0) { undoButton.disabled = true; finaliseButton.disabled = true; }
+            }
+            productEanInput.focus();
+            productQtyInput.value = "1";
+        }).catch(() => showMessage("Server Error on Undo", "red"));
+    });
+    
+    function renderTable(summaryData) {
+        const tableBody = document.querySelector("#scanned_table tbody");
+        tableBody.innerHTML = '';
+        summaryData.forEach(item => {
+            let rowClass = getRowClass(item.Status);
+            let rowId = getSafeId(item.item_name);
+            
+            let itemHtml = `<div style="text-align: left;">
+                                <div style="font-weight: bold; font-size: 12px; margin-bottom: 3px; line-height: 1.1;">${item.item_name}</div>
+                                <div style="font-size: 10px; color: #444;"><strong>FSN:</strong> ${item.fsn || 'N/A'}</div>
+                                <div style="font-size: 10px; color: #666;"><strong>EAN:</strong> ${item.EAN}</div>
+                            </div>`;
+            
+            let row = document.createElement("tr");
+            row.id = rowId;
+            row.className = rowClass;
+            row.dataset.itemName = item.item_name;
+            row.innerHTML = `
+                <td>${itemHtml}</td>
+                <td>${item.Status}</td>
+                <td>${item.Qty}</td>
+                <td style="white-space:nowrap; text-align:left;">
+                    <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="dmg-check" onchange="toggleInput(this, 'dmg-qty')"> Dmg</label>
+                    <input type="number" class="dmg-qty hidden" min="1" placeholder="Qty" style="width:40px; padding:2px; font-size:12px; margin-bottom:2px;"><br>
+                    <label style="font-size:11px; cursor:pointer;"><input type="checkbox" class="exp-check" onchange="toggleInput(this, 'exp-qty')"> Exp</label>
+                    <input type="number" class="exp-qty hidden" min="1" placeholder="Qty" style="width:40px; padding:2px; font-size:12px;">
+                </td>
+            `;
+            tableBody.prepend(row);
+        });
+    }
+
+    function showMessage(text, color) {
+        let msgBox = document.getElementById("ribbon");
+        msgBox.textContent = text; msgBox.style.background = color;
+        msgBox.classList.remove("hidden");
+        setTimeout(() => msgBox.classList.add("hidden"), 3000);
+    }
+
+    finaliseButton.addEventListener("click", function () {
+        let damageData = {}; let expiredData = {}; let hasError = false;
+        document.querySelectorAll("#scanned_table tbody tr").forEach(row => {
+            let scanQty = parseInt(row.cells[2].textContent.split('/')[0]) || 0;
+            
+            let dmgChk = row.querySelector('.dmg-check'); let dmgQty = row.querySelector('.dmg-qty');
+            if (dmgChk && dmgChk.checked) {
+                let dVal = dmgQty.value.trim();
+                if (!dVal || parseInt(dVal) > scanQty) { dmgQty.style.border = '2px solid red'; hasError = true; }
+                else { damageData[row.dataset.itemName] = parseInt(dVal); }
+            }
+            
+            let expChk = row.querySelector('.exp-check'); let expQty = row.querySelector('.exp-qty');
+            if (expChk && expChk.checked) {
+                let eVal = expQty.value.trim();
+                if (!eVal || parseInt(eVal) > scanQty) { expQty.style.border = '2px solid red'; hasError = true; }
+                else { expiredData[row.dataset.itemName] = parseInt(eVal); }
+            }
+        });
+
+        if (hasError) { showMessage("Check highlighted Dmg/Exp fields", "red"); return; }
+
+        this.disabled = true; this.textContent = "Processing...";
+        
+        fetch("/api/get_shortages")
+        .then(res => {
+            if (res.status === 401) { window.location.reload(); return Promise.reject(); }
+            return res.json();
+        })
+        .then(data => {
+            checkShortItems(data.short_items);
+        })
+        .catch(() => {
+            showMessage("Error validating audit", "red");
+            this.disabled = false; this.textContent = "Submit Audit";
+        });
+    });
+
+    function checkShortItems(backendShorts) {
+        if (backendShorts && backendShorts.length > 0) {
+            let container = document.getElementById("short_items_container");
+            container.innerHTML = "";
+            backendShorts.forEach(item => {
+                let safeName = window.safeEscapeHTML ? window.safeEscapeHTML(item.name) : item.name.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                let b64Id = encodeId(item.name);
+
+                container.innerHTML += `
+                    <div style="margin-bottom: 10px; text-align: left; background:#f8f9fa; padding:8px; border-radius:5px;">
+                        <div style="font-size:12px; font-weight:bold; margin-bottom:5px;">${safeName}</div>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span style="font-size:12px; color:#dc3545;">Scanned: ${item.scanned} / ${item.expected}</span>
+                            <input type="number" class="short-confirm-input" data-itemb64="${b64Id}" placeholder="Actual Qty" style="width: 70px; padding: 4px; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+                        </div>
+                    </div>`;
+            });
+            document.getElementById("short_items_modal").classList.remove("hidden");
+        } else {
+            processFinalise({});
+        }
+    }
+
+    document.getElementById("btn_cancel_short").addEventListener("click", () => {
+        document.getElementById("short_items_modal").classList.add("hidden");
+        document.getElementById("finalise").disabled = false;
+        document.getElementById("finalise").textContent = "Submit Audit";
+    });
+
+    document.getElementById("btn_confirm_short").addEventListener("click", () => {
+        let shortConfirmations = {};
+        document.querySelectorAll(".short-confirm-input").forEach(input => {
+            if (input.value.trim() !== "") {
+                let itemName = decodeId(input.dataset.itemb64);
+                shortConfirmations[itemName] = input.value.trim();
+            }
+        });
+        document.getElementById("short_items_modal").classList.add("hidden");
+        processFinalise(shortConfirmations);
+    });
+
+    function processFinalise(shortConfirmations) {
+        let damageData = {}; let expiredData = {}; 
+        
+        document.querySelectorAll("#scanned_table tbody tr").forEach(row => {
+            let dmgChk = row.querySelector('.dmg-check'); let dmgQty = row.querySelector('.dmg-qty');
+            if (dmgChk && dmgChk.checked) damageData[row.dataset.itemName] = parseInt(dmgQty.value.trim());
+            
+            let expChk = row.querySelector('.exp-check'); let expQty = row.querySelector('.exp-qty');
+            if (expChk && expChk.checked) expiredData[row.dataset.itemName] = parseInt(expQty.value.trim());
+        });
+
+        let formData = new FormData();
+        formData.append("damage_data", JSON.stringify(damageData));
+        formData.append("expired_data", JSON.stringify(expiredData));
+        formData.append("short_confirmations", JSON.stringify(shortConfirmations));
+
+        if (window.capturedBlob) { formData.append("evidence_image", window.capturedBlob, "evidence.jpg"); }
+
+        fetch("/finalise", { method: "POST", body: formData })
+        .then(res => {
+            if (res.status === 401) { window.location.reload(); return Promise.reject(); }
+            return res.json();
+        })
+        .then(data => {
+            if(data.status === "error") { showMessage(data.message, "red"); document.getElementById("finalise").disabled = false; document.getElementById("finalise").textContent = "Submit Audit"; return; }
+            showMessage(data.message, "green");
+            if (data.redirect_url) setTimeout(() => { window.location.href = data.redirect_url; }, 1000);
+        }).catch(() => { showMessage("Error finalizing", "red"); document.getElementById("finalise").disabled = false; document.getElementById("finalise").textContent = "Submit Audit"; });
+    }
+</script>
+{% endblock %}

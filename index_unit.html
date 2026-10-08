@@ -1,0 +1,1084 @@
+{% extends "layout.html" %}
+
+{% block title %}{{ config.title }}{% endblock %}
+
+{% block extra_head %}
+<style>
+    .scanner-container { width: 100%; max-width: 600px; background: white; padding: 6px 8px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; flex-grow: 1; position: relative; border-radius: 6px; box-sizing: border-box; }
+    .audit-title { color: #007bff; margin-top: 0; margin-bottom: 4px; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 4px; font-size: 15px; }
+    
+    .input-wrapper { display: flex; align-items: center; gap: 4px; margin: 4px 0; width: 100%; box-sizing: border-box; }
+    input { padding: 6px; border: 1px solid #ccc; font-size: 13px; text-align: center; box-sizing: border-box; border-radius: 4px; width: 100%; }
+    select { padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; width: 100%; box-sizing: border-box; }
+    #box_id { font-weight: bold; margin-bottom: 2px; }
+    
+    #product_ean, #product_imei { flex: 1 1 0%; min-width: 0; } 
+    #product_qty { width: 50px; flex-shrink: 0; }
+    button#undo_button { width: 45px; height: 30px; padding: 0; background-color: #dc3545; border: 1px solid #c82333; color: white; cursor: pointer; border-radius: 4px; font-size: 11px; font-weight: bold; flex-shrink: 0; }
+    
+    .table-container { flex-grow: 1; overflow-y: auto; margin-top: 4px; margin-bottom: 4px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 3px; border: 1px solid #ddd; text-align: center; font-size: 11px; line-height: 1.1;}
+    th { background: #333; color: white; position: sticky; top: 0;}
+    
+    .ok { background: #27e619; color: #000; font-weight: 500;} 
+    .excess { background: #4861f0; color: white;} 
+    .excess-misship { background: #f04d01; color: white; } 
+    .short { background: #f79d15; color: white;}
+    .imei-mismatch { background: #ffc107; color: #000; font-weight: bold;}
+    
+    .action-row { display: flex; gap: 6px; margin-top: 4px; width: 100%; box-sizing: border-box; align-items: stretch; }
+    #finalise { flex-grow: 1; padding: 8px; background: green; color: white; font-size: 15px; font-weight: bold; border: none; cursor: pointer; border-radius: 5px; }
+    #finalise:disabled { background: #aaa; cursor: not-allowed; }
+    .camera-btn { width: 45px; background: #17a2b8; color: white; font-size: 18px; border: none; border-radius: 5px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+    
+    #ribbon { padding: 4px; color: white; font-weight: bold; background: gray; text-align: center; border-radius: 4px; margin-bottom: 4px; font-size: 11px; }
+
+    .custom-modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 9999; display: flex; align-items: center; justify-content: center; }
+    .modal-content { position: relative; background: white; padding: 15px; border-radius: 8px; width: 90%; max-width: 400px; text-align: center; max-height: 85vh; overflow-y: auto; box-shadow: 0 5px 15px rgba(0,0,0,0.3);}
+    .modal-btn { padding: 8px 12px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer; margin: 5px; font-size: 13px; }
+    .hidden { display: none !important; }
+    .verifying-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.94); border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
+    .wsn-spinner { width: 34px; height: 34px; border: 4px solid #e9e0f7; border-top-color: #6f42c1; border-radius: 50%; animation: wsn-spin 0.8s linear infinite; }
+    @keyframes wsn-spin { to { transform: rotate(360deg); } }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="scanner-container">
+    <h2 class="audit-title">{{ config.title }}</h2>
+
+    {% if config.title == "Bin Audit (Unit)" %}
+    <div style="margin-bottom: 4px;">
+        <select id="bin_status">
+            <option value="">-- Select Bin Status (Optional) --</option>
+            <option value="PST Location">PST Location</option>
+            <option value="Misshipment">Misshipment</option>
+            <option value="IRT">IRT</option>
+            <option value="INF">INF</option>
+        </select>
+    </div>
+    {% endif %}
+
+    <input type="text" id="box_id" placeholder="{{ config.placeholder }}" autofocus>
+    
+    <!-- STANDARD EAN WRAPPER -->
+    <div class="input-wrapper" id="ean_wrapper">
+        <input type="text" id="product_ean" placeholder="Scan Product/EAN" autocomplete="off" disabled>
+        <input type="number" id="product_qty" value="1" min="1" disabled title="Quantity per scan">
+        <button id="undo_button">Undo</button>
+    </div>
+
+    <!-- IMEI WRAPPER (Hidden by default) -->
+    <div class="input-wrapper hidden" id="imei_wrapper">
+        <input type="text" id="product_imei" placeholder="Scan IMEI to Verify" autocomplete="off" style="border: 2px solid red;">
+        <button id="cancel_imei_btn" style="background:#dc3545; color:white; border:none; border-radius:4px; padding:6px; font-weight:bold;">Cancel</button>
+    </div>
+    
+    <div id="ribbon" class="hidden"></div>
+    
+    <div class="table-container">
+        <table id="scanned_table">
+            <thead>
+                <tr>
+                    <th style="width: 45%;">Item Info</th>
+                    <th style="width: 20%;">Status</th>
+                    <th style="width: 15%;">Qty</th>
+                    <th style="width: 20%;">Dmg/Exp</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <div class="action-row">
+        <button id="finalise" disabled>Submit Audit</button>
+        <button id="camera_btn" type="button" class="camera-btn" title="Capture Evidence">📷</button>
+        <input type="file" id="native_camera_input" accept="image/*" capture="environment" class="hidden">
+    </div>
+</div>
+
+<div id="double_audit_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#dc3545; margin-top:0; font-size:16px;">Already Audited!</h3>
+        <p id="double_audit_msg" style="font-size: 13px;"></p>
+        <div style="margin-top:10px;">
+            <button id="btn_cancel_redo" class="modal-btn" style="background:#6c757d; color:white;">Cancel</button>
+            <button id="btn_redo_audit" class="modal-btn" style="background:#007bff; color:white;">Redo Audit</button>
+        </div>
+    </div>
+</div>
+
+<!-- Expiry Alert Modal -->
+<div id="expiry_modal" class="custom-modal hidden">
+    <div class="modal-content" style="border: 2px solid #ef4444;">
+        <h3 style="color:#ef4444; margin-top:0; font-size:16px;">⚠️ EXPIRED ITEMS IN BIN</h3>
+        <p style="font-size:12px; color:#555; margin-bottom:10px;">The following expected items have expired!</p>
+        <div id="expiry_container" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; text-align: left;">
+        </div>
+        <button id="btn_close_expiry" class="modal-btn" style="background:#ef4444; color:white; width: 100%;">Acknowledge & Continue</button>
+    </div>
+</div>
+
+<!-- WID Verification Modal -->
+<div id="wid_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#007bff; margin-top:0;">WID Verification Required</h3>
+        <p style="font-size:12px; color:#555; margin-bottom:10px;">Multi-part product detected. Please scan the exact WID to confirm which part you are holding.</p>
+        <input type="text" id="popup_wid_input" placeholder="Scan WID" autocomplete="off" style="width:100%; padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid #ccc; text-align:center; font-size:14px;">
+        <div>
+            <button id="btn_cancel_wid" class="modal-btn" style="background:#dc3545; color:white;">Cancel</button>
+            <button id="btn_submit_wid" class="modal-btn" style="background:#28a745; color:white;">Verify & Next</button>
+        </div>
+    </div>
+</div>
+
+<!-- IMEI Verification Modal -->
+<div id="imei_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#007bff; margin-top:0;">IMEI Verification Required</h3>
+        <p style="font-size:12px; color:#555; margin-bottom:10px;">Please scan the IMEI for this product.</p>
+        <input type="text" id="popup_imei_input" placeholder="Scan IMEI" autocomplete="off" style="width:100%; padding:8px; margin-bottom:15px; border-radius:4px; border:1px solid #ccc; text-align:center; font-size:14px;">
+        <div>
+            <button id="btn_cancel_imei" class="modal-btn" style="background:#dc3545; color:white;">Cancel</button>
+            <button id="btn_submit_imei" class="modal-btn" style="background:#28a745; color:white;">Verify & Add</button>
+        </div>
+    </div>
+</div>
+
+<!-- Serialized Product Capture Modal (NCOB Box Audit only) -->
+<div id="serialized_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#6f42c1; margin-top:0; font-size:16px;">Serialized Product</h3>
+        <p id="serialized_modal_msg" style="font-size:12px; color:#555; margin-bottom:8px;">Serialized product detected. Please scan the details below.</p>
+
+        <input type="text" id="popup_wsn_input" placeholder="Scan WSN" autocomplete="off" style="width:100%; padding:8px; margin-bottom:4px; border-radius:4px; border:1px solid #ccc; text-align:center; font-size:14px;">
+        <p id="wsn_status_msg" class="hidden" style="font-size:11px; font-weight:700; margin:0 0 8px;"></p>
+
+        <input type="text" id="popup_imei1_input" placeholder="Scan IMEI 1 / Serialized Number (Mandatory)" autocomplete="off" disabled style="width:100%; padding:8px; margin-bottom:4px; border-radius:4px; border:1px solid #ccc; text-align:center; font-size:14px; background:#f2f2f2;">
+        <p id="imei1_status_msg" class="hidden" style="font-size:11px; font-weight:700; margin:0 0 8px;"></p>
+
+        <input type="text" id="popup_imei2_input" class="hidden" placeholder="Scan IMEI 2 / Serial Number 2" autocomplete="off" disabled style="width:100%; padding:8px; margin-bottom:8px; border-radius:4px; border:1px solid #ccc; text-align:center; font-size:14px; background:#f2f2f2;">
+
+        <p style="font-size:10px; color:#999; margin-bottom:8px;">If Qty is more than 1, you'll be asked for WSN/IMEI separately for each unit.</p>
+        <p id="serialized_modal_error" class="hidden" style="font-size:12px; font-weight:700; color:#dc3545; background:#fdecea; border:1px solid #dc3545; border-radius:4px; padding:6px 8px; margin:0 0 10px 0;"></p>
+        <div>
+            <button id="btn_cancel_serialized" class="modal-btn" style="background:#dc3545; color:white;">Cancel</button>
+            <button id="btn_submit_serialized" class="modal-btn" style="background:#28a745; color:white;">Save & Add</button>
+        </div>
+        <div id="serialized_verifying_overlay" class="verifying-overlay hidden">
+            <div class="wsn-spinner"></div>
+            <p id="serialized_verifying_text" style="font-size:13px; font-weight:600; color:#6f42c1; margin:10px 0 2px;">Verifying WSN…</p>
+            <p style="font-size:11px; color:#777; margin:0;">Checking against backend records</p>
+        </div>
+    </div>
+</div>
+
+<div id="mapping_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#17a2b8; margin-top:0; font-size:16px;">Catalogue Correction</h3>
+        <p style="font-size:11px; color:#555; margin-bottom:8px;">Alien items detected. Map the Alien EAN to a Short item below.</p>
+        
+        <div style="text-align: left; margin-bottom:8px;">
+            <label style="font-size: 11px; font-weight: bold;">Select Alien EAN:</label>
+            <select id="map_alien_select" style="width:100%; margin-bottom:6px; padding: 4px;"></select>
+            
+            <label style="font-size: 11px; font-weight: bold;">Map to Short FSN:</label>
+            <select id="map_short_select" style="width:100%; padding: 4px;"></select>
+        </div>
+
+        <div style="display:flex; justify-content: space-around; margin-bottom: 12px;">
+            <div style="text-align:center;">
+                <button type="button" class="camera-btn" id="map_btn_prod" onclick="document.getElementById('map_cam_prod').click()" style="width:36px; height:36px; margin:0 auto; font-size:14px;">📷</button>
+                <div style="font-size:9px; margin-top:2px;">Product</div>
+                <input type="file" id="map_cam_prod" accept="image/*" capture="environment" class="hidden" onchange="markCamBtn(this, 'map_btn_prod')">
+            </div>
+            <div style="text-align:center;">
+                <button type="button" class="camera-btn" id="map_btn_ean" onclick="document.getElementById('map_cam_ean').click()" style="width:36px; height:36px; margin:0 auto; font-size:14px;">📷</button>
+                <div style="font-size:9px; margin-top:2px;">EAN</div>
+                <input type="file" id="map_cam_ean" accept="image/*" capture="environment" class="hidden" onchange="markCamBtn(this, 'map_btn_ean')">
+            </div>
+            <div style="text-align:center;">
+                <button type="button" class="camera-btn" id="map_btn_mrp" onclick="document.getElementById('map_cam_mrp').click()" style="width:36px; height:36px; margin:0 auto; font-size:14px;">📷</button>
+                <div style="font-size:9px; margin-top:2px;">MRP</div>
+                <input type="file" id="map_cam_mrp" accept="image/*" capture="environment" class="hidden" onchange="markCamBtn(this, 'map_btn_mrp')">
+            </div>
+        </div>
+
+        <div>
+            <button id="btn_skip_mapping" class="modal-btn" style="background:#6c757d; color:white;">Skip / Finish</button>
+            <button id="btn_submit_mapping" class="modal-btn" style="background:#28a745; color:white;">Confirm Mapping</button>
+        </div>
+    </div>
+</div>
+
+<div id="short_items_modal" class="custom-modal hidden">
+    <div class="modal-content">
+        <h3 style="color:#f79d15; margin-top:0; font-size:16px;">Confirm Short Items</h3>
+        <p style="font-size:12px;">The following items are short. Please confirm actual quantity.</p>
+        <div id="short_items_container" style="margin-bottom:12px;"></div>
+        <div>
+            <button id="btn_cancel_short" class="modal-btn" style="background:#6c757d; color:white;">Cancel</button>
+            <button id="btn_confirm_short" class="modal-btn" style="background:#28a745; color:white;">Confirm & Submit</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    let pendingEan = "";
+    let pendingQty = 1;
+    let pendingWid = "";
+    let pendingSerializedWsn = "";
+    let pendingSerializedImei1 = "";
+    let pendingSerializedImei2 = "";
+    let pendingSerializedItemName = "";
+    let pendingSerializedTotal = 1;
+    let pendingSerializedRemaining = 1;
+    let pendingWsnVerifiedResult = null;   // {title, serial, fsn, vertical} once /api/verify_wsn succeeds
+
+    function encodeId(str) { return btoa(encodeURIComponent(str)); }
+    function decodeId(b64) { return decodeURIComponent(atob(b64)); }
+
+    function getSafeId(str) { return "row_" + encodeId(str).replace(/[^a-zA-Z0-9]/g, ''); }
+    
+    function getRowClass(match) {
+        if (!match) return 'ok';
+        let m = match.toUpperCase();
+        if (m.includes('MISMATCH')) return 'imei-mismatch';
+        // Check for Excess (A) and other orange/red states FIRST
+        if (m.includes('EXCESS (A)') || m.includes('MISSHIP') || m.includes('ALIEN')) return 'excess-misship';
+        if (m.includes('EXCESS')) return 'excess';
+        if (m.includes('SHORT')) return 'short';
+        return 'ok';
+    }
+
+    function toggleInput(checkbox, targetClass) {
+        let input = checkbox.closest('td').querySelector('.' + targetClass);
+        input.classList.toggle('hidden', !checkbox.checked);
+        if (!checkbox.checked) { input.value = ''; input.style.border = ''; }
+        input.oninput = function() { this.style.border = ''; };
+    }
+
+    function markCamBtn(inputElem, btnId) {
+        let btn = document.getElementById(btnId);
+        if(inputElem.files && inputElem.files.length > 0) btn.style.background = '#28a745';
+        else btn.style.background = '#17a2b8';
+    }
+
+    function showMessage(text, color) {
+        let msgBox = document.getElementById("ribbon");
+        msgBox.textContent = text; msgBox.style.background = color;
+        msgBox.classList.remove("hidden");
+        setTimeout(() => msgBox.classList.add("hidden"), 3000);
+    }
+
+    document.getElementById("box_id").addEventListener("keypress", function (e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            let boxId = this.value.trim(); if (!boxId) return;
+            
+            document.getElementById("global_spinner").classList.remove("hidden");
+
+            let formData = new FormData();
+            formData.append("box_id", boxId);
+
+            fetch("/scan_box", { method: "POST", body: formData })
+            .then(res => {
+                if (res.status === 401) { window.location.reload(); return Promise.reject(); }
+                return res.json();
+            }).then(data => {
+                document.getElementById("global_spinner").classList.add("hidden");
+                if (data.already_audited) {
+                    document.getElementById("double_audit_msg").textContent = data.message;
+                    // Only show the "Redo Audit" button when the backend allows redoing.
+                    document.getElementById("btn_redo_audit").classList.toggle("hidden", data.allow_redo === false);
+                    document.getElementById("double_audit_modal").classList.remove("hidden");
+                    window.pendingBoxId = boxId;
+                    return;
+                }
+                processScanBoxSuccess(data);
+            }).catch(() => {
+                document.getElementById("global_spinner").classList.add("hidden");
+                showMessage("Server Error", "red");
+            });
+        }
+    });
+
+    document.getElementById("btn_cancel_redo").addEventListener("click", () => {
+        document.getElementById("double_audit_modal").classList.add("hidden");
+        let box = document.getElementById("box_id");
+        box.value = "";
+        box.disabled = false;
+        box.focus();
+    });
+
+    document.getElementById("btn_redo_audit").addEventListener("click", () => {
+        document.getElementById("double_audit_modal").classList.add("hidden");
+        let formData = new FormData();
+        formData.append("box_id", window.pendingBoxId);
+        formData.append("force_redo", "true");
+        
+        document.getElementById("global_spinner").classList.remove("hidden");
+        fetch("/scan_box", { method: "POST", body: formData })
+        .then(res => {
+            if (res.status === 401) { window.location.reload(); return Promise.reject(); }
+            return res.json();
+        }).then(data => {
+            document.getElementById("global_spinner").classList.add("hidden");
+            processScanBoxSuccess(data);
+        });
+    });
+
+    function processScanBoxSuccess(data) {
+        showMessage(data.message, data.status === "error" ? "red" : "green");
+        if (data.status === "success" || data.status === "warning") {
+            document.getElementById("box_id").disabled = true;
+            document.getElementById("product_ean").disabled = false;
+            document.getElementById("product_qty").disabled = false;
+            document.getElementById("product_ean").focus();
+            document.querySelector("#scanned_table tbody").innerHTML = '';
+            
+            if (data.expired_alerts && data.expired_alerts.length > 0) {
+                alert("⚠️ EXPIRED ITEMS DETECTED IN BIN ⚠️\n\n" + data.expired_alerts.join("\n\n"));
+            }
+        }
+    }
+
+    // Backend WSN/IMEI verification (get_wsn_location) can take a few seconds with
+    // retries - block the popup's inputs and show a spinner for that window so the
+    // auditor can't double-submit or edit fields while it's in flight. Input-specific
+    // enable/disable (which field is next) is managed by each step function below,
+    // not here - this only owns the spinner + Cancel button.
+    function showSerializedVerifying(text) {
+        document.getElementById("serialized_verifying_text").textContent = text || "Verifying…";
+        document.getElementById("serialized_verifying_overlay").classList.remove("hidden");
+        document.getElementById("popup_wsn_input").disabled = true;
+        document.getElementById("popup_imei1_input").disabled = true;
+        document.getElementById("popup_imei2_input").disabled = true;
+        document.getElementById("btn_submit_serialized").disabled = true;
+        document.getElementById("btn_cancel_serialized").disabled = true;
+    }
+    function hideSerializedVerifying() {
+        document.getElementById("serialized_verifying_overlay").classList.add("hidden");
+        document.getElementById("btn_cancel_serialized").disabled = false;
+        document.getElementById("btn_submit_serialized").disabled = false;
+    }
+
+    function resetSerializedStepState() {
+        pendingWsnVerifiedResult = null;
+        document.getElementById("wsn_status_msg").classList.add("hidden");
+        document.getElementById("popup_wsn_input").disabled = false;
+        document.getElementById("popup_imei1_input").value = "";
+        document.getElementById("popup_imei1_input").disabled = true;
+        document.getElementById("imei1_status_msg").classList.add("hidden");
+        document.getElementById("popup_imei2_input").value = "";
+        document.getElementById("popup_imei2_input").disabled = true;
+        document.getElementById("popup_imei2_input").classList.add("hidden");
+    }
+
+    // Step 1: WSN scanned - validate the format locally (no network call for an
+    // obviously-wrong scan), then verify against the backend immediately, before the
+    // auditor is even allowed to type an IMEI.
+    function verifyWsnScanned() {
+        let wsnInput = document.getElementById("popup_wsn_input");
+        let wsn = wsnInput.value.trim();
+        let wsnStatus = document.getElementById("wsn_status_msg");
+        document.getElementById("serialized_modal_error").classList.add("hidden");
+
+        if (!wsn) {
+            wsnStatus.textContent = "Please scan WSN.";
+            wsnStatus.style.color = "#dc3545";
+            wsnStatus.classList.remove("hidden");
+            return;
+        }
+        if (!/^[A-Z0-9]{6}_[A-Z0-9]$/i.test(wsn)) {
+            wsnStatus.textContent = "✗ Invalid WSN format (expected 8 chars, e.g. 24VAR7_X)";
+            wsnStatus.style.color = "#dc3545";
+            wsnStatus.classList.remove("hidden");
+            wsnInput.select();
+            return;
+        }
+
+        showSerializedVerifying("Verifying WSN…");
+        let formData = new FormData();
+        formData.append("wsn", wsn);
+        fetch("/api/verify_wsn", { method: "POST", body: formData })
+        .then(res => res.json())
+        .then(data => {
+            hideSerializedVerifying();
+            document.getElementById("popup_wsn_input").disabled = false;
+            if (data.status !== "success") {
+                pendingWsnVerifiedResult = null;
+                wsnStatus.textContent = "✗ " + data.message;
+                wsnStatus.style.color = "#dc3545";
+                wsnStatus.classList.remove("hidden");
+                wsnInput.select();
+                return;
+            }
+            pendingWsnVerifiedResult = data;
+            wsnStatus.textContent = data.verified
+                ? "✓ WSN verified" + (data.title ? " — " + data.title : "")
+                : "WSN Logged (backend verification off)";
+            wsnStatus.style.color = data.verified ? "#28a745" : "#6c757d";
+            wsnStatus.classList.remove("hidden");
+            document.getElementById("popup_wsn_input").disabled = true;   // locked in either way
+            let imei1 = document.getElementById("popup_imei1_input");
+            imei1.disabled = false;
+            imei1.focus();
+        })
+        .catch(() => {
+            hideSerializedVerifying();
+            document.getElementById("popup_wsn_input").disabled = false;
+            wsnStatus.textContent = "✗ Network error verifying WSN. Please retry.";
+            wsnStatus.style.color = "#dc3545";
+            wsnStatus.classList.remove("hidden");
+        });
+    }
+
+    // Step 2: IMEI 1 scanned - checked instantly, client-side, against the result
+    // /api/verify_wsn already fetched (no extra network round trip). Matches ->
+    // IMEI 2 is skipped entirely and the unit saves immediately. Doesn't match ->
+    // IMEI 2 is revealed as the next required field. The server re-checks both on
+    // save regardless - this is purely for a fast auditor-facing signal.
+    function checkImei1Scanned() {
+        let imei1Input = document.getElementById("popup_imei1_input");
+        let imei1 = imei1Input.value.trim();
+        let statusEl = document.getElementById("imei1_status_msg");
+        if (!imei1) {
+            statusEl.textContent = "IMEI 1 / Serial Number is mandatory.";
+            statusEl.style.color = "#dc3545";
+            statusEl.classList.remove("hidden");
+            return;
+        }
+        if (!pendingWsnVerifiedResult) { return; }   // shouldn't happen, field is disabled until WSN verified
+
+        let backendSerial = (pendingWsnVerifiedResult.serial || "").toUpperCase();
+        let matched = backendSerial && backendSerial.indexOf(imei1.toUpperCase()) !== -1;
+
+        if (matched || !backendSerial) {
+            if (pendingWsnVerifiedResult.verified) {
+                statusEl.textContent = matched ? "✓ Matches backend record" : "";
+                statusEl.style.color = "#28a745";
+                statusEl.classList.toggle("hidden", !matched);
+            } else {
+                statusEl.textContent = "IMEI/Serial Logged (backend verification off)";
+                statusEl.style.color = "#6c757d";
+                statusEl.classList.remove("hidden");
+            }
+            document.getElementById("popup_imei2_input").classList.add("hidden");
+            document.getElementById("popup_imei2_input").value = "";
+            submitSerializedUnit();
+        } else {
+            statusEl.textContent = "✗ Doesn't match backend record — scan IMEI 2 / Serial Number 2";
+            statusEl.style.color = "#dc3545";
+            statusEl.classList.remove("hidden");
+            let imei2 = document.getElementById("popup_imei2_input");
+            imei2.classList.remove("hidden");
+            imei2.disabled = false;
+            imei2.value = "";
+            imei2.focus();
+        }
+    }
+
+    // Step 3 (only if IMEI 1 didn't match): IMEI 2 scanned - let the server make the
+    // final call either way, it re-checks both IMEI 1 and IMEI 2 against the record.
+    function checkImei2Scanned() {
+        let imei2 = document.getElementById("popup_imei2_input").value.trim();
+        if (!imei2) { return; }
+        submitSerializedUnit();
+    }
+
+    function submitSerializedUnit() {
+        let wsn = document.getElementById("popup_wsn_input").value.trim();
+        let imei1 = document.getElementById("popup_imei1_input").value.trim();
+        let imei2 = document.getElementById("popup_imei2_input").value.trim();
+        showSerializedVerifying("Saving…");
+        submitProductScan("", "", wsn, imei1, imei2, 1);
+    }
+
+    function submitProductScan(imei = "", wid = "", serWsn = "", serImei1 = "", serImei2 = "", forceQty = null) {
+        let eanElem = document.getElementById("product_ean");
+        let qtyElem = document.getElementById("product_qty");
+        
+        let ean = pendingEan || eanElem.value.trim();
+        if (ean === "") return;
+        let qty = forceQty !== null ? forceQty : (pendingQty > 1 ? pendingQty : (qtyElem.value.trim() || 1));
+        
+        eanElem.disabled = true;
+
+        let formData = new FormData();
+        formData.append("scanned_ean", ean);
+        formData.append("quantity", qty);
+        
+        if (wid) pendingWid = wid;
+        if (pendingWid) formData.append("scanned_wid", pendingWid);
+        if (imei) formData.append("scanned_imei", imei);
+
+        if (serWsn) pendingSerializedWsn = serWsn;
+        if (serImei1) pendingSerializedImei1 = serImei1;
+        if (serImei2) pendingSerializedImei2 = serImei2;
+        if (pendingSerializedWsn) formData.append("serialized_wsn", pendingSerializedWsn);
+        if (pendingSerializedImei1) formData.append("serialized_imei1", pendingSerializedImei1);
+        if (pendingSerializedImei2) formData.append("serialized_imei2", pendingSerializedImei2);
+
+        fetch("/scan_product", { method: "POST", body: formData })
+        .then(res => {
+            if (res.status === 401) { window.location.reload(); return Promise.reject(); }
+            return res.json();
+        }).then(data => {
+            hideSerializedVerifying();
+
+            // 1. Error Handling
+            if(data.status === "error") { 
+                showMessage(data.message, "red"); 
+                if (!document.getElementById("wid_modal").classList.contains("hidden")) {
+                    document.getElementById("popup_wid_input").value = "";
+                    document.getElementById("popup_wid_input").focus();
+                } else if (!document.getElementById("serialized_modal").classList.contains("hidden")) {
+                    document.getElementById("serialized_modal_error").textContent = data.message;
+                    document.getElementById("serialized_modal_error").classList.remove("hidden");
+                    document.getElementById("popup_imei1_input").value = "";
+                    document.getElementById("popup_imei1_input").disabled = false;
+                    document.getElementById("imei1_status_msg").classList.add("hidden");
+                    document.getElementById("popup_imei2_input").value = "";
+                    document.getElementById("popup_imei2_input").disabled = true;
+                    document.getElementById("popup_imei2_input").classList.add("hidden");
+                    document.getElementById("popup_imei1_input").focus();
+                } else if (!document.getElementById("imei_wrapper").classList.contains("hidden")) {
+                    document.getElementById("popup_imei_input").value = "";
+                    document.getElementById("popup_imei_input").focus();
+                } else {
+                    eanElem.disabled = false;
+                    eanElem.focus();
+                }
+                return; 
+            }
+
+            // 2. Disambiguation Requirement Handling
+            if(data.status === "require_wid") {
+                pendingEan = ean;
+                pendingQty = qty;
+                document.getElementById("popup_wid_input").value = "";
+                document.getElementById("wid_modal").classList.remove("hidden");
+                setTimeout(() => document.getElementById("popup_wid_input").focus(), 100);
+                showMessage(data.message, "orange");
+                return;
+            }
+            
+            // 3. IMEI Requirement Handling
+            if(data.status === "require_imei") {
+                pendingEan = ean;
+                pendingQty = qty;
+                document.getElementById("popup_imei_input").value = "";
+                document.getElementById("wid_modal").classList.add("hidden");
+                document.getElementById("imei_modal").classList.remove("hidden");
+                setTimeout(() => document.getElementById("popup_imei_input").focus(), 100);
+                showMessage(data.message, "orange");
+                return;
+            }
+
+            // 3.5 Serialized FSN Capture Handling (NCOB Box Audit) - one unit at a time
+            if(data.status === "require_serialized_scan") {
+                pendingEan = ean;
+                pendingQty = qty;
+                pendingSerializedTotal = qty;
+                pendingSerializedRemaining = qty;
+                document.getElementById("wid_modal").classList.add("hidden");
+                document.getElementById("imei_modal").classList.add("hidden");
+                document.getElementById("popup_wsn_input").value = "";
+                resetSerializedStepState();
+                document.getElementById("serialized_modal_error").classList.add("hidden");
+                document.getElementById("popup_imei1_input").placeholder = data.is_mobile
+                    ? "Scan IMEI 1 (Mandatory)" : "Scan Serial Number (Mandatory)";
+                document.getElementById("popup_imei2_input").placeholder = data.is_mobile
+                    ? "Scan IMEI 2 (only if IMEI 1 didn't match)" : "Scan Serial Number 2 (only if 1 didn't match)";
+                let unitLabel = qty > 1 ? ` — Unit 1 of ${qty}` : "";
+                pendingSerializedItemName = data.item_name || "";
+                let titleLine = pendingSerializedItemName ? `<strong>${window.safeEscapeHTML ? window.safeEscapeHTML(pendingSerializedItemName) : pendingSerializedItemName}</strong><br>` : "";
+                document.getElementById("serialized_modal_msg").innerHTML = titleLine + (data.message + (data.fsn ? ` (FSN: ${data.fsn})` : "") + unitLabel);
+                document.getElementById("serialized_modal").classList.remove("hidden");
+                setTimeout(() => document.getElementById("popup_wsn_input").focus(), 100);
+                showMessage(data.message, "orange");
+                document.getElementById("finalise").disabled = true;
+                return;
+            }
+            
+            // 4. Success Handling
+            let rowId = getSafeId(data.item_name);
+            let existing = document.getElementById(rowId);
+            let rowClass = getRowClass(data.match);
+
+            let itemHtml = `<div style="text-align: left;">
+                                <div style="font-weight: bold; font-size: 11px; margin-bottom: 2px; line-height: 1.1;">${data.item_name}</div>
+                                <div style="font-size: 9px; color: #444;"><strong>FSN:</strong> ${data.fsn || 'N/A'}</div>
+                                <div style="font-size: 9px; color: #666;"><strong>EAN:</strong> ${data.ean}</div>
+                                ${data.wsn ? `<div style="font-size: 9px; color: #6f42c1;"><strong>WSN:</strong> ${data.wsn}</div>` : ""}
+                                ${(data.imei || data.imei2) ? `<div style="font-size: 9px; color: #6f42c1;"><strong>IMEI/Serial:</strong> ${data.imei || ""}${data.imei2 ? " / " + data.imei2 : ""}</div>` : ""}
+                            </div>`;
+
+            if (existing) {
+                existing.className = rowClass;
+                existing.cells[0].innerHTML = itemHtml;
+                existing.cells[1].textContent = data.match;
+                existing.cells[2].textContent = data.qty;
+            } else {
+                let row = document.createElement("tr");
+                row.id = rowId;
+                row.className = rowClass;
+                row.dataset.itemName = data.item_name;
+                
+                row.innerHTML = `
+                    <td>${itemHtml}</td>
+                    <td>${data.match}</td>
+                    <td>${data.qty}</td>
+                    <td style="white-space:nowrap; text-align:left; vertical-align:middle;">
+                        <div style="display:flex; align-items:center; gap:2px; margin-bottom:2px;">
+                            <label style="font-size:10px; cursor:pointer; margin:0;"><input type="checkbox" class="dmg-check" onchange="toggleInput(this, 'dmg-qty')" style="width:auto; margin:0;"> Dmg</label>
+                            <input type="number" class="dmg-qty hidden" min="1" placeholder="Qty" style="width:36px; padding:1px 2px; font-size:10px; border:1px solid #aaa; border-radius:3px;">
+                        </div>
+                        <div style="display:flex; align-items:center; gap:2px;">
+                            <label style="font-size:10px; cursor:pointer; margin:0;"><input type="checkbox" class="exp-check" onchange="toggleInput(this, 'exp-qty')" style="width:auto; margin:0;"> Exp</label>
+                            <input type="number" class="exp-qty hidden" min="1" placeholder="Qty" style="width:36px; padding:1px 2px; font-size:10px; border:1px solid #aaa; border-radius:3px;">
+                        </div>
+                    </td>
+                `;
+                document.querySelector("#scanned_table tbody").prepend(row);
+            }
+
+            // If this was a serialized-item capture and more units of the same scan
+            // action still need their own WSN/IMEI, keep the popup open for the next one
+            // instead of finishing the scan - this is what stops one WSN/IMEI covering Qty > 1.
+            if (pendingSerializedRemaining > 1) {
+                pendingSerializedRemaining -= 1;
+                pendingSerializedWsn = ""; pendingSerializedImei1 = ""; pendingSerializedImei2 = "";
+                document.getElementById("popup_wsn_input").value = "";
+                resetSerializedStepState();
+                document.getElementById("serialized_modal_error").classList.add("hidden");
+                let doneCount = pendingSerializedTotal - pendingSerializedRemaining;
+                let titleLine = pendingSerializedItemName ? `<strong>${window.safeEscapeHTML ? window.safeEscapeHTML(pendingSerializedItemName) : pendingSerializedItemName}</strong><br>` : "";
+                document.getElementById("serialized_modal_msg").innerHTML =
+                    titleLine + `Unit ${doneCount + 1} of ${pendingSerializedTotal} — scan WSN and IMEI1/Serialized Number.`;
+                showMessage(`Unit ${doneCount} of ${pendingSerializedTotal} saved. Scan the next unit.`, "green");
+                setTimeout(() => document.getElementById("popup_wsn_input").focus(), 100);
+                document.getElementById("finalise").disabled = true;
+                return;
+            }
+            pendingSerializedTotal = 1; pendingSerializedRemaining = 1;
+
+            document.getElementById("imei_modal").classList.add("hidden");
+            document.getElementById("wid_modal").classList.add("hidden");
+            document.getElementById("serialized_modal").classList.add("hidden");
+            resetSerializedStepState();
+            pendingEan = ""; pendingQty = 1; pendingWid = "";
+            pendingSerializedWsn = ""; pendingSerializedImei1 = ""; pendingSerializedImei2 = ""; pendingSerializedItemName = "";
+            
+            eanElem.value = ""; 
+            qtyElem.value = "1";
+            eanElem.disabled = false;
+
+            if (pendingShortSerializedQueue.length > 0) {
+                processNextShortSerializedItem();
+                return;
+            }
+
+            eanElem.focus();
+            document.getElementById("finalise").disabled = false;
+        }).catch(() => {
+            hideSerializedVerifying();
+            showMessage("Server Error", "red");
+            eanElem.disabled = false;
+            eanElem.focus();
+        });
+    }
+
+    document.getElementById("product_ean").addEventListener("keypress", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); submitProductScan(); }
+    });
+
+    document.getElementById("btn_submit_wid").addEventListener("click", () => {
+        let wid = document.getElementById("popup_wid_input").value.trim();
+        if (!wid) { showMessage("Please scan WID", "orange"); return; }
+        submitProductScan("", wid); 
+    });
+
+    document.getElementById("btn_cancel_wid").addEventListener("click", () => {
+        document.getElementById("wid_modal").classList.add("hidden");
+        pendingEan = ""; pendingQty = 1; pendingWid = "";
+        let eanElem = document.getElementById("product_ean");
+        eanElem.value = "";
+        eanElem.disabled = false;
+        eanElem.focus();
+    });
+
+    document.getElementById("popup_wid_input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            document.getElementById("btn_submit_wid").click();
+        }
+    });
+
+    document.getElementById("btn_submit_imei").addEventListener("click", () => {
+        let imei = document.getElementById("popup_imei_input").value.trim();
+        if (!imei) { showMessage("Please scan IMEI", "orange"); return; }
+        submitProductScan(imei);
+    });
+
+    document.getElementById("btn_cancel_imei").addEventListener("click", () => {
+        document.getElementById("imei_modal").classList.add("hidden");
+        pendingEan = ""; pendingQty = 1; pendingWid = "";
+        let eanElem = document.getElementById("product_ean");
+        eanElem.value = "";
+        eanElem.disabled = false;
+        eanElem.focus();
+    });
+
+    document.getElementById("popup_imei_input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            document.getElementById("btn_submit_imei").click();
+        }
+    });
+
+    document.getElementById("btn_submit_serialized").addEventListener("click", () => {
+        // Mouse-click fallback for auditors not relying on the scanner's Enter key -
+        // just advances whichever step is currently active.
+        if (!pendingWsnVerifiedResult) { verifyWsnScanned(); return; }
+        if (!document.getElementById("popup_imei2_input").classList.contains("hidden")
+            && document.getElementById("popup_imei2_input").value.trim()) {
+            checkImei2Scanned();
+            return;
+        }
+        if (document.getElementById("popup_imei1_input").value.trim()) {
+            checkImei1Scanned();
+            return;
+        }
+        let errBox = document.getElementById("serialized_modal_error");
+        errBox.textContent = "IMEI 1 / Serial Number is mandatory.";
+        errBox.classList.remove("hidden");
+        document.getElementById("popup_imei1_input").focus();
+    });
+
+    document.getElementById("btn_cancel_serialized").addEventListener("click", () => {
+        document.getElementById("serialized_modal").classList.add("hidden");
+        document.getElementById("serialized_modal_error").classList.add("hidden");
+        resetSerializedStepState();
+        pendingEan = ""; pendingQty = 1; pendingWid = "";
+        pendingSerializedWsn = ""; pendingSerializedImei1 = ""; pendingSerializedImei2 = ""; pendingSerializedItemName = "";
+        pendingSerializedTotal = 1; pendingSerializedRemaining = 1;
+        let eanElem = document.getElementById("product_ean");
+        eanElem.value = "";
+        eanElem.disabled = false;
+        eanElem.focus();
+        if (pendingShortSerializedQueue.length > 0 || Object.keys(pendingShortNonSerializedConfirmations).length > 0) {
+            // Cancelling mid-queue aborts the whole short-items confirmation - don't
+            // finalize on partial/incomplete verification, and don't silently skip to
+            // the next item either. Auditor can reopen "Submit Audit" to try again.
+            pendingShortSerializedQueue = [];
+            pendingShortNonSerializedConfirmations = {};
+            showMessage("Short-item confirmation cancelled - remaining units were not verified.", "red");
+        }
+        document.getElementById("finalise").disabled = document.querySelectorAll("#scanned_table tbody tr").length === 0;
+    });
+
+    document.getElementById("popup_wsn_input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); verifyWsnScanned(); }
+    });
+    document.getElementById("popup_imei1_input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); checkImei1Scanned(); }
+    });
+    document.getElementById("popup_imei2_input").addEventListener("keypress", (e) => {
+        if (e.key === "Enter") { e.preventDefault(); checkImei2Scanned(); }
+    });
+
+    document.getElementById("undo_button").addEventListener("click", function() {
+        fetch("/undo_scan", { method: "POST" }).then(res => res.json()).then(data => {
+            if (data.status === "error") { showMessage(data.message, "red"); return; }
+            showMessage(data.message, "orange");
+            
+            if (data.status === "removed") {
+                let rowId = getSafeId(data.undone_ean);
+                let row = document.getElementById(rowId);
+                if (row) row.remove();
+            } else if (data.status === "updated") {
+                let rowId = getSafeId(data.undone_ean);
+                let row = document.getElementById(rowId);
+                if (row) {
+                    row.cells[1].textContent = data.match;
+                    row.cells[2].textContent = data.new_qty;
+                    row.className = getRowClass(data.match);
+                }
+            }
+            
+            document.getElementById("product_qty").value = "1";
+            document.getElementById("product_ean").focus();
+            if(document.querySelectorAll("#scanned_table tbody tr").length === 0) {
+                document.getElementById("finalise").disabled = true;
+            }
+        }).catch(() => showMessage("Server Error on Undo", "red"));
+    });
+
+    // --- SUBMISSION FLOW ---
+    document.getElementById("finalise").addEventListener("click", function () {
+        let hasError = false;
+        document.querySelectorAll("#scanned_table tbody tr").forEach(row => {
+            let scanQty = parseInt(row.cells[2].textContent.split('/')[0]) || 0;
+            
+            let dmgChk = row.querySelector('.dmg-check'); let dmgQty = row.querySelector('.dmg-qty');
+            if (dmgChk && dmgChk.checked) {
+                let val = dmgQty.value.trim();
+                if (!val || parseInt(val) > scanQty) { dmgQty.style.border = '1px solid red'; hasError = true; }
+            }
+
+            let expChk = row.querySelector('.exp-check'); let expQty = row.querySelector('.exp-qty');
+            if (expChk && expChk.checked) {
+                let val = expQty.value.trim();
+                if (!val || parseInt(val) > scanQty) { expQty.style.border = '1px solid red'; hasError = true; }
+            }
+        });
+
+        if (hasError) { showMessage("Check highlighted Dmg/Exp fields", "red"); return; }
+
+        this.disabled = true; this.textContent = "Processing...";
+
+        fetch("/api/get_shortages")
+        .then(res => {
+            if (res.status === 401) { window.location.reload(); return Promise.reject(); }
+            return res.json();
+        })
+        .then(data => {
+            let backendShorts = data.short_items || [];
+            
+            let aliens = [];
+            document.querySelectorAll("#scanned_table tbody tr").forEach(row => {
+                let status = row.cells[1].textContent.trim();
+                if (status.includes("ALIEN")) aliens.push({name: row.dataset.itemName, ean: row.dataset.itemName});
+            });
+
+            if (aliens.length > 0 && backendShorts.length > 0) {
+                let alienSelect = document.getElementById("map_alien_select");
+                let shortSelect = document.getElementById("map_short_select");
+                alienSelect.innerHTML = ""; shortSelect.innerHTML = "";
+                
+                // Safe DOM insertion
+                aliens.forEach(a => {
+                    let opt = document.createElement("option");
+                    opt.value = a.ean; opt.textContent = a.ean;
+                    alienSelect.appendChild(opt);
+                });
+                backendShorts.forEach(s => {
+                    let opt = document.createElement("option");
+                    opt.value = s.name; opt.textContent = `${s.name} (Scan: ${s.scanned}/${s.expected})`;
+                    shortSelect.appendChild(opt);
+                });
+                
+                document.getElementById("mapping_modal").classList.remove("hidden");
+                this.disabled = false; this.textContent = "Submit Audit";
+                return; 
+            }
+
+            checkShortItems(backendShorts);
+        })
+        .catch(() => {
+            showMessage("Error validating audit", "red");
+            this.disabled = false; this.textContent = "Submit Audit";
+        });
+    });
+
+    document.getElementById("btn_skip_mapping").addEventListener("click", () => {
+        document.getElementById("mapping_modal").classList.add("hidden");
+        fetch("/api/get_shortages").then(res=>res.json()).then(data => checkShortItems(data.short_items));
+    });
+
+    document.getElementById("btn_submit_mapping").addEventListener("click", () => {
+        let p_img = document.getElementById("map_cam_prod").files.length;
+        let e_img = document.getElementById("map_cam_ean").files.length;
+        let m_img = document.getElementById("map_cam_mrp").files.length;
+
+        if (p_img === 0 || e_img === 0 || m_img === 0) {
+            alert("All 3 images (Product, EAN, MRP) are required for Catalogue Correction.");
+            return;
+        }
+
+        let formData = new FormData();
+        formData.append("alien_ean", document.getElementById("map_alien_select").value);
+        formData.append("short_item_name", document.getElementById("map_short_select").value);
+        formData.append("img_product", document.getElementById("map_cam_prod").files[0]);
+        formData.append("img_ean", document.getElementById("map_cam_ean").files[0]);
+        formData.append("img_mrp", document.getElementById("map_cam_mrp").files[0]);
+
+        document.getElementById("btn_submit_mapping").textContent = "Mapping...";
+        document.getElementById("btn_submit_mapping").disabled = true;
+
+        fetch("/api/map_catalogue", { method: "POST", body: formData })
+        .then(res => res.json()).then(data => {
+            if (data.status === "success") {
+                showMessage("Mapped successfully!", "green");
+                let alienRow = document.getElementById(getSafeId(data.updated_item.removed_alien));
+                if (alienRow) alienRow.remove();
+                
+                let shortRow = document.getElementById(getSafeId(data.updated_item.name));
+                if (shortRow) {
+                    shortRow.cells[1].textContent = data.updated_item.match;
+                    shortRow.cells[2].textContent = data.updated_item.new_qty;
+                    shortRow.className = getRowClass(data.updated_item.match);
+                } else {
+                    let safeNameEscaped = window.safeEscapeHTML ? window.safeEscapeHTML(data.updated_item.name) : data.updated_item.name;
+                    let itemHtml = `<div style="text-align: left;">
+                                        <div style="font-weight: bold; font-size: 11px; margin-bottom: 2px; line-height: 1.1;">${safeNameEscaped}</div>
+                                    </div>`;
+                    let newRow = document.createElement("tr");
+                    newRow.id = getSafeId(data.updated_item.name);
+                    newRow.className = getRowClass(data.updated_item.match);
+                    newRow.dataset.itemName = data.updated_item.name;
+                    newRow.innerHTML = `
+                        <td>${itemHtml}</td>
+                        <td>${data.updated_item.match}</td>
+                        <td>${data.updated_item.new_qty}</td>
+                        <td style="white-space:nowrap; text-align:left; vertical-align:middle;">
+                            <div style="display:flex; align-items:center; gap:2px; margin-bottom:2px;">
+                                <label style="font-size:10px; cursor:pointer; margin:0;"><input type="checkbox" class="dmg-check" onchange="toggleInput(this, 'dmg-qty')" style="width:auto; margin:0;"> Dmg</label>
+                                <input type="number" class="dmg-qty hidden" min="1" placeholder="Qty" style="width:36px; padding:1px 2px; font-size:10px; border:1px solid #aaa; border-radius:3px;">
+                            </div>
+                            <div style="display:flex; align-items:center; gap:2px;">
+                                <label style="font-size:10px; cursor:pointer; margin:0;"><input type="checkbox" class="exp-check" onchange="toggleInput(this, 'exp-qty')" style="width:auto; margin:0;"> Exp</label>
+                                <input type="number" class="exp-qty hidden" min="1" placeholder="Qty" style="width:36px; padding:1px 2px; font-size:10px; border:1px solid #aaa; border-radius:3px;">
+                            </div>
+                        </td>
+                    `;
+                    document.querySelector("#scanned_table tbody").prepend(newRow);
+                }
+
+                document.getElementById("mapping_modal").classList.add("hidden");
+                fetch("/api/get_shortages").then(res=>res.json()).then(newData => checkShortItems(newData.short_items));
+            } else {
+                alert(data.message);
+            }
+        }).finally(() => {
+            document.getElementById("btn_submit_mapping").textContent = "Confirm Mapping";
+            document.getElementById("btn_submit_mapping").disabled = false;
+        });
+    });
+
+    function checkShortItems(backendShorts) {
+        if (backendShorts && backendShorts.length > 0) {
+            let container = document.getElementById("short_items_container");
+            container.innerHTML = "";
+            backendShorts.forEach(item => {
+                let safeName = window.safeEscapeHTML ? window.safeEscapeHTML(item.name) : item.name.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+                let b64Id = encodeId(item.name);
+
+                if (item.is_serialized) {
+                    // Typing a number here no longer skips verification - it queues
+                    // that many additional units to be scanned through the exact same
+                    // WSN/IMEI popup as a normal EAN scan, before the audit can submit.
+                    let remaining = Math.max(0, item.expected - item.verified_count);
+                    container.innerHTML += `
+                        <div style="margin-bottom: 8px; text-align: left; background:#fff8e6; padding:6px; border-radius:5px; border:1px solid #f79d15;">
+                            <div style="font-size:11px; font-weight:bold; margin-bottom:4px;">${safeName}</div>
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-size:11px; color:#dc3545;">Verified: ${item.verified_count} / ${item.expected}</span>
+                                <input type="number" class="short-confirm-input" data-itemb64="${b64Id}" data-serialized-fsn="${item.fsn}" value="0" min="0" max="${remaining}" style="width: 60px; padding: 3px; border:1px solid #ccc; border-radius:4px; font-size:11px;">
+                            </div>
+                            <div style="font-size:10px; color:#856404; margin-top:3px;">Serialized product - entering a qty will prompt WSN/IMEI scanning for each unit, same as a normal scan.</div>
+                        </div>`;
+                } else {
+                    container.innerHTML += `
+                        <div style="margin-bottom: 8px; text-align: left; background:#f8f9fa; padding:6px; border-radius:5px;">
+                            <div style="font-size:11px; font-weight:bold; margin-bottom:4px;">${safeName}</div>
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <span style="font-size:11px; color:#dc3545;">Scanned: ${item.scanned} / ${item.expected}</span>
+                                <input type="number" class="short-confirm-input" data-itemb64="${b64Id}" placeholder="Qty" style="width: 60px; padding: 3px; border:1px solid #ccc; border-radius:4px; font-size:11px;">
+                            </div>
+                        </div>`;
+                }
+            });
+            document.getElementById("short_items_modal").classList.remove("hidden");
+        } else {
+            processFinalise({});
+        }
+    }
+
+    let pendingShortSerializedQueue = [];              // [{name, fsn, qty}] - additional units still needing WSN/IMEI
+    let pendingShortNonSerializedConfirmations = {};
+
+    document.getElementById("btn_cancel_short").addEventListener("click", () => {
+        document.getElementById("short_items_modal").classList.add("hidden");
+        pendingShortSerializedQueue = [];
+        pendingShortNonSerializedConfirmations = {};
+        document.getElementById("finalise").disabled = false;
+        document.getElementById("finalise").textContent = "Submit Audit";
+    });
+
+    document.getElementById("btn_confirm_short").addEventListener("click", () => {
+        let shortConfirmations = {};
+        pendingShortSerializedQueue = [];
+        document.querySelectorAll(".short-confirm-input").forEach(input => {
+            let val = input.value.trim();
+            if (val === "" || val === "0") return;
+            let itemName = decodeId(input.dataset.itemb64);
+            let fsn = input.dataset.serializedFsn;
+            if (fsn) {
+                let addQty = parseInt(val, 10);
+                if (addQty > 0) {
+                    pendingShortSerializedQueue.push({ name: itemName, fsn: fsn, qty: addQty });
+                }
+            } else {
+                shortConfirmations[itemName] = val;
+            }
+        });
+        pendingShortNonSerializedConfirmations = shortConfirmations;
+        document.getElementById("short_items_modal").classList.add("hidden");
+        processNextShortSerializedItem();
+    });
+
+    function processNextShortSerializedItem() {
+        if (pendingShortSerializedQueue.length === 0) {
+            processFinalise(pendingShortNonSerializedConfirmations);
+            return;
+        }
+        let next = pendingShortSerializedQueue.shift();
+        // Exactly the same path as scanning this FSN with this Qty normally - triggers
+        // require_serialized_scan and the WSN/IMEI popup, same verification as always.
+        pendingEan = next.fsn;
+        pendingQty = next.qty;
+        submitProductScan();
+    }
+
+    function processFinalise(shortConfirmations) {
+        document.getElementById("finalise").disabled = true;
+        document.getElementById("finalise").textContent = "Processing...";
+        
+        let damageData = {}; let expiredData = {}; 
+        
+        document.querySelectorAll("#scanned_table tbody tr").forEach(row => {
+            let dmgChk = row.querySelector('.dmg-check'); let dmgQty = row.querySelector('.dmg-qty');
+            if (dmgChk && dmgChk.checked) damageData[row.dataset.itemName] = parseInt(dmgQty.value.trim());
+            
+            let expChk = row.querySelector('.exp-check'); let expQty = row.querySelector('.exp-qty');
+            if (expChk && expChk.checked) expiredData[row.dataset.itemName] = parseInt(expQty.value.trim());
+        });
+
+        let formData = new FormData();
+        formData.append("damage_data", JSON.stringify(damageData));
+        formData.append("expired_data", JSON.stringify(expiredData));
+        formData.append("short_confirmations", JSON.stringify(shortConfirmations));
+        
+        let binStat = document.getElementById("bin_status");
+        if (binStat) formData.append("bin_status", binStat.value);
+        if (window.capturedBlob) { formData.append("evidence_image", window.capturedBlob, "evidence.jpg"); }
+
+        fetch("/finalise", { method: "POST", body: formData })
+        .then(res => {
+            if (res.status === 401) { window.location.reload(); return Promise.reject(); }
+            return res.json();
+        })
+        .then(data => {
+            if(data.status === "error") { showMessage(data.message, "red"); document.getElementById("finalise").disabled = false; document.getElementById("finalise").textContent = "Submit Audit"; return; }
+            showMessage(data.message, "green");
+            if (data.redirect_url) setTimeout(() => { window.location.href = data.redirect_url; }, 1000);
+        }).catch(() => { showMessage("Error finalizing", "red"); document.getElementById("finalise").disabled = false; document.getElementById("finalise").textContent = "Submit Audit"; });
+    }
+</script>
+{% endblock %}

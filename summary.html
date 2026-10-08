@@ -1,0 +1,107 @@
+{% extends "layout.html" %}
+
+{% block title %}Summary - {{ meta.audit_type }}{% endblock %}
+
+{% block content %}
+<div style="width: 100%; max-width: 600px; background: white; padding: 20px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); border-radius: 8px; box-sizing: border-box;">
+    
+    <h2 style="margin-top:0; color: #28a745; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px;">
+        {{ meta.audit_type }} Complete
+    </h2>
+
+    <div style="font-size: 16px; margin: 15px 0; text-align: center;">
+        <div style="background: #e9ecef; padding: 8px 15px; border-radius: 20px; font-weight: bold; color: #495057; margin-bottom: 10px;">
+            ID: {{ meta.box_id }}
+        </div>
+        <div style="font-size: 12px; color: #6c757d;">
+            Audit No: <strong>{{ meta.audit_no }}</strong>
+        </div>
+    </div>
+
+    <div style="text-align: center; margin: 15px 0; padding: 12px; border-radius: 6px; font-size: 15px; font-weight: bold;
+        {% if meta.total_scanned == meta.total_expected %} background: #d4edda; color: #155724; border: 1px solid #28a745;
+        {% elif meta.total_scanned > meta.total_expected %} background: #dbe4ff; color: #1a3fa8; border: 1px solid #4861f0;
+        {% else %} background: #fff3cd; color: #7a5b00; border: 1px solid #f79d15;
+        {% endif %}">
+        Overall: Scanned {{ meta.total_scanned }} / Expected {{ meta.total_expected }}
+        {% if meta.total_scanned == meta.total_expected %} ✓ Matches
+        {% elif meta.total_scanned > meta.total_expected %} (Excess {{ meta.total_scanned - meta.total_expected }})
+        {% else %} (Short {{ meta.total_expected - meta.total_scanned }})
+        {% endif %}
+    </div>
+
+    <div style="width: 100%; overflow-x: auto; margin-top: 20px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 13px; text-align: center;">
+            <thead>
+                <tr style="background: #343a40; color: white;">
+                    <th style="padding: 10px; border: 1px solid #ddd;">Product/FSN</th>
+                    <th style="padding: 10px; border: 1px solid #ddd;">Status</th>
+                    <th style="padding: 10px; border: 1px solid #ddd;" title="Expected Quantity">Exp</th>
+                    <th style="padding: 10px; border: 1px solid #ddd;" title="Scanned Quantity">Scan</th>
+                    <th style="padding: 10px; border: 1px solid #ddd;" title="Damage & Expired">D/E</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in summary %}
+                    {% set u_status = row.Status | upper %}
+                    <tr
+                        {% if 'OK' in u_status %} style="background: #27e619; color: #000; font-weight: 500;"
+                        {% elif 'MISMATCH' in u_status %} style="background: #ffc107; color: #000; font-weight:bold;"
+                        {% elif 'EXCESS (A)' in u_status or 'MISSHIP' in u_status or 'ALIEN' in u_status %} style="background: #f04d01; color: #fff;"
+                        {% elif 'EXCESS' in u_status %} style="background: #4861f0; color: #fff;"
+                        {% elif 'SHORT' in u_status %} style="background: #f79d15; color: #fff;"
+                        {% elif 'UNSCANNED PART' in u_status %} style="background: #e2e3e5; color: #383d41; font-weight:bold;"
+                        {% else %} style="background: white; color: black;"
+                        {% endif %}>
+
+                        <td style="padding: 10px; border: 1px solid #ddd; text-align: left;">
+                            <div style="font-weight:bold; margin-bottom:3px;">{{ row.Product }}</div>
+                            <small style="color:#444;">{{ row.FSN }}</small>
+                            {% if row.get('Bin Status') %}
+                            <div style="font-size:10px; background:#ffc107; color:black; display:inline-block; padding:2px 4px; border-radius:3px; margin-top:4px;">{{ row['Bin Status'] }}</div>
+                            {% endif %}
+                        </td>
+                        <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">{{ row.Status }}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">{{ row['Expected Qty'] }}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd;">{{ row['Scanned Qty'] }}</td>
+                        <td style="padding: 10px; border: 1px solid #ddd; font-size:11px;">
+                            {% if row['Damage Qty'] %}<span style="color:#dc3545; font-weight:bold;">D:{{ row['Damage Qty'] }}</span><br>{% endif %}
+                            {% if row['Expired Qty'] %}<span style="color:#6f42c1; font-weight:bold;">E:{{ row['Expired Qty'] }}</span>{% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Modified the bottom to export the CSV after confirming -->
+    <div style="display: flex; gap: 10px; margin-top: 25px;">
+        <button id="btn_confirm_export" style="flex: 1; padding: 15px; background: #28a745; color: white; font-size: 18px; font-weight: bold; border: none; border-radius: 5px; cursor: pointer;">
+            Confirm & Export CSV
+        </button>
+    </div>
+</div>
+
+<script>
+    document.getElementById('btn_confirm_export').addEventListener('click', function() {
+        this.disabled = true;
+        this.textContent = "Exporting...";
+        
+        fetch('/api/export_csv', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            if(data.status === "success") {
+                window.location.href = '/scanner/{{ meta.audit_slug }}';
+            } else {
+                alert("Export error: " + data.message);
+                this.disabled = false;
+                this.textContent = "Confirm & Export CSV";
+            }
+        }).catch(err => {
+            alert("Failed to export. Please try again.");
+            this.disabled = false;
+            this.textContent = "Confirm & Export CSV";
+        });
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,106 @@
+{% extends "layout.html" %}
+
+{% block title %}Hub - QPex Audit Hub{% endblock %}
+
+{% block extra_head %}
+<style>
+    .hub-container { 
+        width: 100%; 
+        max-width: 600px; 
+        background: white; 
+        border-radius: var(--radius-md); 
+        box-shadow: var(--shadow-float); 
+        padding: 20px; 
+        box-sizing: border-box; 
+        margin-bottom: 20px;
+    }
+    .page-title { 
+        text-align: center; 
+        color: var(--text-dark); 
+        margin-top: 0; 
+        margin-bottom: 20px; 
+        font-size: 20px; 
+        border-bottom: 2px solid #eee; 
+        padding-bottom: 15px; 
+    }
+    .audit-list { 
+        display: flex; 
+        flex-direction: column; 
+        gap: 12px; 
+    }
+    
+    .action-btn { 
+        display: block; 
+        width: 100%; 
+        padding: 12px 15px;
+        font-size: 16px; 
+        font-weight: bold; 
+        color: white; 
+        text-align: center; 
+        text-decoration: none; 
+        border-radius: var(--radius-sm); 
+        box-sizing: border-box; 
+        transition: transform 0.2s, box-shadow 0.2s; 
+    }
+    
+    .action-btn:active {
+        transform: scale(0.98);
+    }
+    
+    .btn-alt-1 { background: linear-gradient(135deg, #3b82f6, #2563eb); box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3); } 
+    .btn-alt-1:hover { background: linear-gradient(135deg, #2563eb, #1d4ed8); }
+    
+    .btn-alt-2 { background: linear-gradient(135deg, #64748b, #475569); box-shadow: 0 4px 6px rgba(100, 116, 139, 0.3); } 
+    .btn-alt-2:hover { background: linear-gradient(135deg, #475569, #334155); }
+
+    .btn-orange { background: linear-gradient(135deg, #f97316, #d97706); box-shadow: 0 4px 6px rgba(249, 115, 22, 0.3); } 
+    .btn-orange:hover { background: linear-gradient(135deg, #ea580c, #b45309); }
+    
+    .dashboard-section { 
+        width: 100%; 
+        max-width: 600px; 
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .btn-dark { 
+        display: block; 
+        width: 100%; 
+        padding: 12px; 
+        background: linear-gradient(135deg, #1e293b, #0f172a); 
+        color: white; 
+        text-align: center; 
+        text-decoration: none; 
+        font-weight: bold; 
+        border-radius: var(--radius-sm); 
+        box-sizing: border-box; 
+        font-size: 15px; 
+        transition: transform 0.2s; 
+        box-shadow: 0 4px 6px rgba(15, 23, 42, 0.3);
+    }
+    .btn-dark:active { transform: scale(0.98); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="hub-container">
+    <h2 class="page-title">Select Audit Type</h2>
+    <div class="audit-list">
+        <a href="{{ url_for('scanner', audit_type='unit') }}" class="action-btn btn-alt-1">Bin Audit</a>
+        <a href="{{ url_for('scanner', audit_type='putlist') }}" class="action-btn btn-alt-2">Putlist Audit</a>
+        <a href="{{ url_for('scanner', audit_type='picklist') }}" class="action-btn btn-alt-1">Picklist Audit</a>
+        <a href="{{ url_for('scanner', audit_type='hl_box_audit') }}" class="action-btn btn-alt-2">NCOB Box Audit</a>
+        <a href="{{ url_for('scanner', audit_type='ob_audit') }}" class="action-btn btn-alt-1">Customer Outbound Audit</a>
+        <a href="{{ url_for('scanner', audit_type='cx_misship') }}" class="action-btn btn-orange">PV Audit</a>
+        <a href="{{ url_for('scanner', audit_type='proxy_pack') }}" class="action-btn btn-alt-2">Proxy Packaging Audit</a>
+        <a href="{{ url_for('scanner', audit_type='shrink_wrap') }}" class="action-btn btn-alt-1">ShrinkWrap Audit</a>
+        <a href="{{ url_for('scanner', audit_type='tamper_seal') }}" class="action-btn btn-alt-2">TamperSeal Audit</a>
+        <a href="{{ url_for('scanner', audit_type='bulk') }}" class="action-btn btn-orange" style="display: none;">Bulk Bin Audit</a>
+    </div>
+</div>
+<div class="dashboard-section">
+    <a href="{{ url_for('dashboard') }}" class="btn-dark">📊 View Daily Audit Summary Dashboard</a>
+    <a href="{{ url_for('history_page') }}" class="btn-dark" style="background: linear-gradient(135deg, #0f766e, #047857);">📥 Download Audit History</a>
+</div>
+{% endblock %}  

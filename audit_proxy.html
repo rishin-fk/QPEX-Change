@@ -1,0 +1,87 @@
+{% extends "layout.html" %}
+
+{% block title %}Proxy Packaging Audit{% endblock %}
+
+{% block extra_head %}
+<style>
+    .scanner-container { width: 100%; max-width: 600px; background: white; padding: 20px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1); display: flex; flex-direction: column; position: relative; border-radius: 6px; box-sizing: border-box; }
+    .audit-title { color: #17a2b8; margin-top: 0; margin-bottom: 20px; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    .form-group { margin-bottom: 15px; text-align: left; }
+    label { display: block; margin-bottom: 5px; font-weight: 600; color: #495057; }
+    input { width: 100%; padding: 12px; border: 1px solid #ccc; font-size: 16px; box-sizing: border-box; border-radius: 4px; }
+    #submit_btn { flex-grow: 1; padding: 15px; background: green; color: white; font-size: 18px; font-weight: bold; border: none; cursor: pointer; border-radius: 5px;}
+    #submit_btn:disabled { background: #aaa; cursor: not-allowed; }
+    #ribbon { padding: 10px; color: white; font-weight: bold; background: gray; text-align: center; border-radius: 4px; margin-bottom: 15px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="scanner-container">
+    <h2 class="audit-title">{{ config.title }}</h2>
+
+    <div id="ribbon" class="hidden"></div>
+    
+    <div class="form-group">
+        <label>TID (Transaction/Tracking ID)</label>
+        <input type="text" id="tid" placeholder="Scan or Enter TID" autocomplete="off" autofocus>
+    </div>
+
+    <div class="form-group">
+        <label>Packing SKU</label>
+        <input type="text" id="packing_sku" placeholder="Scan or Enter Packing SKU" autocomplete="off">
+    </div>
+
+    <div class="action-row">
+        <button id="submit_btn">Log Audit</button>
+        <button id="camera_btn" type="button" class="camera-btn" title="Capture Evidence">📷</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    function showMessage(text, color) {
+        let msgBox = document.getElementById("ribbon");
+        msgBox.textContent = text; msgBox.style.background = color;
+        msgBox.classList.remove("hidden");
+        setTimeout(() => msgBox.classList.add("hidden"), 3000);
+    }
+
+    document.getElementById("submit_btn").addEventListener("click", function () {
+        let tid = document.getElementById("tid").value.trim();
+        let packingSku = document.getElementById("packing_sku").value.trim();
+
+        if (!tid || !packingSku) { showMessage("Both TID and Packing SKU are required.", "red"); return; }
+
+        this.disabled = true;
+        this.textContent = "Processing...";
+        
+        let formData = new FormData();
+        formData.append("tid", tid);
+        formData.append("packing_sku", packingSku);
+
+        if (window.capturedBlob) {
+            formData.append("evidence_image", window.capturedBlob, "evidence.jpg");
+        }
+
+        fetch("/api/submit_proxy_pack", { method: "POST", body: formData })
+        .then(res => res.json()).then(data => {
+            if (data.status === "success") {
+                showMessage(data.message, "green");
+                document.getElementById("tid").value = "";
+                document.getElementById("packing_sku").value = "";
+                
+                window.capturedBlob = null;
+                const cameraBtn = document.getElementById('camera_btn');
+                if(cameraBtn) { cameraBtn.classList.remove('has-image'); cameraBtn.style.backgroundColor = '#17a2b8'; }
+                
+                document.getElementById("tid").focus();
+            } else {
+                showMessage(data.message, "red");
+            }
+            this.disabled = false;
+            this.textContent = "Log Audit";
+        }).catch(() => { showMessage("Error logging audit", "red"); this.disabled = false; this.textContent = "Log Audit"; });
+    });
+</script>
+{% endblock %}
